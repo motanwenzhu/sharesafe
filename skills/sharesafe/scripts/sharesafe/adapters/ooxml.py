@@ -55,13 +55,28 @@ def _xml_search_text(root: ET.Element, limit: int) -> str:
     body_parts: list[str] = []
     attribute_parts: list[str] = []
     length = 0
-    for value in root.itertext():
-        if not value:
-            continue
-        length += len(value)
-        if length > limit:
-            raise ValueError("expanded XML text exceeds the configured limit")
-        body_parts.append(value)
+    # ``Element.itertext()`` has differed across CPython patch releases in
+    # whether nodes retained by ``insert_comments``/``insert_pis`` contribute
+    # their text. Walk the tree explicitly so comments and processing
+    # instructions remain searchable on every supported runtime. The stack
+    # also avoids recursion on adversarially deep but otherwise parseable XML.
+    pending: list[tuple[ET.Element | None, str | None]] = [(root, None)]
+    while pending:
+        element, queued_text = pending.pop()
+        if element is None:
+            value = queued_text
+        else:
+            value = element.text
+            children = list(element)
+            for child in reversed(children):
+                if child.tail:
+                    pending.append((None, child.tail))
+                pending.append((child, None))
+        if value:
+            length += len(value)
+            if length > limit:
+                raise ValueError("expanded XML text exceeds the configured limit")
+            body_parts.append(value)
     for element in root.iter():
         for value in element.attrib.values():
             text = str(value)

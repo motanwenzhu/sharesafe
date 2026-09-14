@@ -26,6 +26,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Unsupported, encrypted, malformed, parser-failed, dependency-blocked, and resource-limited content produces `incomplete` rather than a clean result.
 - Archive entry, decompressed-byte, compression-ratio, and nesting limits guard recursive inspection.
 - Classic and ZIP64 central directories are preflighted before per-entry objects are materialized; archive/member comments and directory names are scanned under bounded budgets.
+- OOXML XML text traversal explicitly includes retained comments and processing instructions across supported CPython patch releases.
 - Selected roots, empty-directory leaves, and OOXML part names participate in masked name inventory and verification; selecting a `Users`, `home`, or `Documents and Settings` container retains scan-only context so first-level usernames remain masked in scan, sanitize, and verify reports.
 - PNG compressed-text parsing uses a cumulative text budget, strict single-stream validation, and a 4,096-chunk hard cap.
 - Finding retention is bounded per artifact and per report; truncation becomes an explicit gap, and repeated matches retain unique deterministic IDs.
