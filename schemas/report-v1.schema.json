@@ -1,0 +1,145 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:sharesafe:schema:report:v1",
+  "title": "ShareSafe scan report v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "tool", "run", "summary", "artifacts", "findings", "gaps", "errors", "dependencies"],
+  "properties": {
+    "schema": {"const": "sharesafe.report/v1"},
+    "tool": {"$ref": "#/$defs/tool"},
+    "run": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "started_at", "offline", "report_mode", "limits"],
+      "properties": {
+        "id": {"type": "string", "pattern": "^run-[0-9a-f]{16}$"},
+        "started_at": {"type": "string", "format": "date-time"},
+        "offline": {"const": true},
+        "report_mode": {"enum": ["shareable", "local"]},
+        "limits": {"type": "object", "additionalProperties": {"type": "integer", "minimum": 0}}
+      }
+    },
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["verdict", "artifacts_total", "artifacts_complete", "artifacts_partial", "findings", "gaps", "errors"],
+      "properties": {
+        "verdict": {"enum": ["no_findings", "review", "block", "incomplete"]},
+        "artifacts_total": {"type": "integer", "minimum": 0},
+        "artifacts_complete": {"type": "integer", "minimum": 0},
+        "artifacts_partial": {"type": "integer", "minimum": 0},
+        "findings": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["info", "low", "medium", "high", "critical"],
+          "properties": {
+            "info": {"type": "integer", "minimum": 0},
+            "low": {"type": "integer", "minimum": 0},
+            "medium": {"type": "integer", "minimum": 0},
+            "high": {"type": "integer", "minimum": 0},
+            "critical": {"type": "integer", "minimum": 0}
+          }
+        },
+        "gaps": {"type": "integer", "minimum": 0},
+        "errors": {"type": "integer", "minimum": 0}
+      }
+    },
+    "artifacts": {"type": "array", "items": {"$ref": "#/$defs/artifact"}},
+    "findings": {"type": "array", "items": {"$ref": "#/$defs/finding"}},
+    "gaps": {"type": "array", "items": {"$ref": "#/$defs/gap"}},
+    "errors": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["code", "message"],
+        "properties": {"code": {"type": "string"}, "message": {"type": "string"}}
+      }
+    },
+    "dependencies": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "available", "version", "capability"],
+        "properties": {
+          "name": {"type": "string"},
+          "available": {"type": "boolean"},
+          "version": {"type": ["string", "null"]},
+          "capability": {"type": "string"}
+        }
+      }
+    }
+  },
+  "$defs": {
+    "tool": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version"],
+      "properties": {"name": {"const": "sharesafe"}, "version": {"type": "string"}}
+    },
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "path", "content_token", "size", "media_type", "status", "coverage"],
+      "properties": {
+        "id": {"type": "string", "pattern": "^a-[0-9a-f]{20}$"},
+        "path": {"type": "string"},
+        "content_token": {"type": ["string", "null"], "pattern": "^hmac-sha256:content-v1:[0-9a-f]{32}$"},
+        "size": {"type": ["integer", "null"], "minimum": 0},
+        "media_type": {"type": "string"},
+        "status": {"enum": ["scanned", "partial"]},
+        "coverage": {
+          "type": "object",
+          "additionalProperties": {"enum": ["complete", "partial", "unsupported", "not_applicable"]}
+        }
+      }
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode"],
+      "properties": {
+        "mode": {"enum": ["masked", "omitted"]},
+        "masked": {"type": "string"},
+        "value_class": {"type": "string"},
+        "token": {"type": "string", "pattern": "^hmac-sha256:v1:[0-9a-f]{32}$"}
+      }
+    },
+    "finding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "artifact_id", "rule_id", "category", "severity", "confidence", "title", "location", "evidence", "remediation"],
+      "properties": {
+        "id": {"type": "string", "pattern": "^f-[0-9a-f]{20}$"},
+        "artifact_id": {"type": "string"},
+        "rule_id": {"type": "string"},
+        "category": {"type": "string"},
+        "severity": {"enum": ["info", "low", "medium", "high", "critical"]},
+        "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+        "title": {"type": "string"},
+        "location": {"type": "object"},
+        "evidence": {"$ref": "#/$defs/evidence"},
+        "remediation": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["supported", "action"],
+          "properties": {"supported": {"type": "boolean"}, "action": {"type": "string"}}
+        }
+      }
+    },
+    "gap": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "artifact_id", "capability", "reason", "detail"],
+      "properties": {
+        "id": {"type": "string", "pattern": "^g-[0-9a-f]{20}$"},
+        "artifact_id": {"type": ["string", "null"]},
+        "capability": {"type": "string"},
+        "reason": {"type": "string"},
+        "detail": {"type": "string"}
+      }
+    }
+  }
+}

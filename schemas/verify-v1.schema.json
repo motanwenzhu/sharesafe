@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:sharesafe:schema:verify:v1",
+  "title": "ShareSafe verification result v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "tool", "operation", "original", "prepared", "verification"],
+  "properties": {
+    "schema": {"const": "sharesafe.verify/v1"},
+    "tool": {"$ref": "urn:sharesafe:schema:report:v1#/$defs/tool"},
+    "operation": {"const": "verify"},
+    "original": {"$ref": "urn:sharesafe:schema:report:v1"},
+    "prepared": {"$ref": "urn:sharesafe:schema:report:v1"},
+    "verification": {"$ref": "urn:sharesafe:schema:sanitize:v1#/$defs/verification"}
+  }
+}

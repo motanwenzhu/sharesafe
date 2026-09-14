@@ -1,0 +1,7 @@
+interface:
+  display_name: "ShareSafe"
+  short_description: "Audit privacy leaks before files leave your device"
+  default_prompt: "Use $sharesafe to audit these files before I share them, and summarize only masked findings and coverage gaps."
+
+policy:
+  allow_implicit_invocation: true

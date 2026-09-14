@@ -1,0 +1,104 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:sharesafe:schema:sanitize:v1",
+  "title": "ShareSafe sanitize result v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "tool", "operation", "source", "destination", "actions", "before", "after", "verification"],
+  "properties": {
+    "schema": {"const": "sharesafe.sanitize/v1"},
+    "tool": {"$ref": "urn:sharesafe:schema:report:v1#/$defs/tool"},
+    "operation": {"const": "sanitize"},
+    "source": {"const": "<scan-boundary>"},
+    "destination": {"const": "<new-copy>"},
+    "actions": {"type": "array", "items": {"$ref": "#/$defs/action"}},
+    "before": {"$ref": "urn:sharesafe:schema:report:v1"},
+    "after": {"$ref": "urn:sharesafe:schema:report:v1"},
+    "verification": {"$ref": "#/$defs/verification"}
+  },
+  "$defs": {
+    "action": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "action", "status"],
+      "properties": {
+        "path": {"type": "string"},
+        "action": {"type": "string"},
+        "status": {"enum": ["applied", "not_needed", "skipped", "partial", "unsupported", "failed"]},
+        "reason": {"type": "string"},
+        "mode": {"type": "string"}
+      }
+    },
+    "verification": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["outcome", "ready_for_review", "statement", "counts", "resolved", "remaining", "introduced", "integrity"],
+      "properties": {
+        "outcome": {"enum": ["improved", "unchanged", "regressed", "incomplete"]},
+        "ready_for_review": {"type": "boolean"},
+        "statement": {"type": "string"},
+        "counts": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["resolved", "remaining", "introduced"],
+          "properties": {
+            "resolved": {"type": "integer", "minimum": 0},
+            "remaining": {"type": "integer", "minimum": 0},
+            "introduced": {"type": "integer", "minimum": 0}
+          }
+        },
+        "resolved": {"type": "array", "items": {"$ref": "#/$defs/comparisonFinding"}},
+        "remaining": {"type": "array", "items": {"$ref": "#/$defs/comparisonFinding"}},
+        "introduced": {"type": "array", "items": {"$ref": "#/$defs/comparisonFinding"}},
+        "integrity": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["outcome", "artifacts_before", "artifacts_after", "unchanged", "allowed_transforms", "issues"],
+          "properties": {
+            "outcome": {"enum": ["preserved", "transformed", "unverified"]},
+            "artifacts_before": {"type": "integer", "minimum": 0},
+            "artifacts_after": {"type": "integer", "minimum": 0},
+            "unchanged": {"type": "integer", "minimum": 0},
+            "allowed_transforms": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["path", "action", "media_type"],
+                "properties": {
+                  "path": {"type": "string"},
+                  "action": {"enum": ["remove_ooxml_metadata", "strip_png_metadata", "strip_jpeg_metadata"]},
+                  "media_type": {"type": "string"}
+                }
+              }
+            },
+            "issues": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["code", "path", "detail"],
+                "properties": {
+                  "code": {"type": "string"},
+                  "path": {"type": "string"},
+                  "detail": {"type": "string"}
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "comparisonFinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["rule_id", "severity", "path", "location"],
+      "properties": {
+        "rule_id": {"type": "string"},
+        "severity": {"enum": ["info", "low", "medium", "high", "critical"]},
+        "path": {"type": "string"},
+        "location": {"type": "object"}
+      }
+    }
+  }
+}

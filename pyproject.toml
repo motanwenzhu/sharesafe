@@ -1,0 +1,50 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sharesafe"
+version = "0.1.0"
+description = "Local, evidence-producing privacy gate for files before they leave your machine"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+authors = [{ name = "ShareSafe contributors" }]
+keywords = ["privacy", "security", "metadata", "pii", "secrets", "codex-skill"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Environment :: Console",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Security",
+]
+dependencies = []
+
+[project.optional-dependencies]
+images = ["Pillow>=10"]
+pdf = ["pypdf>=5"]
+full = ["Pillow>=10", "pypdf>=5"]
+dev = ["pytest>=8", "build>=1.2", "jsonschema>=4"]
+
+[project.scripts]
+sharesafe = "sharesafe.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/motanwenzhu/sharesafe"
+Repository = "https://github.com/motanwenzhu/sharesafe"
+Issues = "https://github.com/motanwenzhu/sharesafe/issues"
+
+[tool.setuptools]
+package-dir = {"" = "skills/sharesafe/scripts"}
+
+[tool.setuptools.packages.find]
+where = ["skills/sharesafe/scripts"]
+include = ["sharesafe*"]
+
+[tool.pytest.ini_options]
+addopts = "-ra --basetemp=.pytest-tmp -p no:cacheprovider"
+testpaths = ["tests"]

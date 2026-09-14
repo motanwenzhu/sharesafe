@@ -1,0 +1,140 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Python ${{ matrix.python-version }} on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python-version: ["3.11", "3.12", "3.13"]
+
+    steps:
+      - name: Check out ShareSafe
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[full,dev]"
+
+      - name: Run tests
+        run: python -m pytest
+
+      - name: Run installed console-script smoke test
+        run: |
+          sharesafe --version
+          sharesafe doctor --json
+          sharesafe self-test --json
+
+      - name: Run bundled CLI smoke test
+        run: |
+          python skills/sharesafe/scripts/run_sharesafe.py doctor --json
+          python skills/sharesafe/scripts/run_sharesafe.py self-test --json
+
+  package:
+    name: Validate release artifacts
+    needs: test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out ShareSafe
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Check out the official OpenAI Skill validator
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: openai/skills
+          ref: 49f948faa9258a0c61caceaf225e179651397431
+          path: .openai-skills
+          sparse-checkout: skills/.system/skill-creator/scripts
+          persist-credentials: false
+
+      - name: Install packaging tools
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install "setuptools>=77" wheel build twine PyYAML
+
+      - name: Validate the Codex Skill
+        run: >-
+          python .openai-skills/skills/.system/skill-creator/scripts/quick_validate.py
+          skills/sharesafe
+
+      - name: Build wheel and source distribution
+        run: python -m build
+
+      - name: Check package metadata and contents
+        run: |
+          python -m twine check dist/*
+          python .github/scripts/check_release_artifacts.py dist
+
+      - name: Rebuild a wheel from the source distribution
+        run: |
+          mkdir -p "${RUNNER_TEMP}/from-sdist"
+          cp dist/*.tar.gz "${RUNNER_TEMP}/from-sdist/"
+          python -m pip wheel --no-deps --no-build-isolation \
+            --wheel-dir "${RUNNER_TEMP}/from-sdist" dist/*.tar.gz
+          python .github/scripts/check_release_artifacts.py "${RUNNER_TEMP}/from-sdist"
+
+      - name: Install wheel in an isolated environment and smoke-test the CLI
+        run: |
+          smoke_env="${RUNNER_TEMP}/sharesafe-smoke"
+          python -m venv "${smoke_env}"
+          "${smoke_env}/bin/python" -m pip install --no-index --no-deps dist/*.whl
+          "${smoke_env}/bin/python" -m pip check
+          "${smoke_env}/bin/sharesafe" --version
+          "${smoke_env}/bin/python" -m sharesafe doctor --json
+          "${smoke_env}/bin/python" -m sharesafe self-test --json
+          "${smoke_env}/bin/python" -m sharesafe scan README.md --json
+
+      - name: Install the wheel rebuilt from the source distribution
+        run: |
+          smoke_env="${RUNNER_TEMP}/sharesafe-sdist-smoke"
+          python -m venv "${smoke_env}"
+          "${smoke_env}/bin/python" -m pip install --no-index --no-deps "${RUNNER_TEMP}/from-sdist/"*.whl
+          "${smoke_env}/bin/python" -m pip check
+          "${smoke_env}/bin/sharesafe" --version
+          "${smoke_env}/bin/python" -m sharesafe doctor --json
+          "${smoke_env}/bin/python" -m sharesafe self-test --json
+          "${smoke_env}/bin/python" -m sharesafe scan README.md --json
+
+      - name: Upload validated distributions
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: sharesafe-distributions
+          path: |
+            dist/*.whl
+            dist/*.tar.gz
+          if-no-files-found: error
+          retention-days: 14
