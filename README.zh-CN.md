@@ -9,7 +9,7 @@ ShareSafe 会在分享文件、目录或发布包之前，检查可能的泄露�
 
 ShareSafe 目前是 alpha 软件。分享敏感内容前，请同时审阅报告、覆盖缺口和文件本身。
 
-[English](README.md) · [格式支持矩阵](SUPPORT_MATRIX.md) · [威胁模型](THREAT_MODEL.md) · [架构](docs/architecture.md) · [调研](docs/research.md)
+[English](README.md) · [详细使用手册](docs/user-guide.zh-CN.md) · [设计与流程](docs/design-and-workflows.zh-CN.md) · [格式支持矩阵](SUPPORT_MATRIX.md) · [威胁模型](THREAT_MODEL.md) · [架构](docs/architecture.md) · [调研](docs/research.md)
 
 ## v0.1 解决什么问题
 

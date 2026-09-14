@@ -9,7 +9,7 @@ ShareSafe scans a file, directory, or release bundle for likely disclosure risks
 
 ShareSafe is alpha software. Review the report, the coverage gaps, and the files themselves before sharing anything sensitive.
 
-[简体中文](README.zh-CN.md) · [Support matrix](SUPPORT_MATRIX.md) · [Threat model](THREAT_MODEL.md) · [Architecture](docs/architecture.md) · [Research](docs/research.md)
+[简体中文](README.zh-CN.md) · [Chinese user guide](docs/user-guide.zh-CN.md) · [Design & workflows (中文)](docs/design-and-workflows.zh-CN.md) · [Support matrix](SUPPORT_MATRIX.md) · [Threat model](THREAT_MODEL.md) · [Architecture](docs/architecture.md) · [Research](docs/research.md)
 
 ## What v0.1 is for
 

@@ -6,6 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Documentation
+
+- Added a detailed Chinese user manual covering installation, scanning, report interpretation, sanitization, verification, Codex Skill usage, CI integration, limits, and troubleshooting.
+- Added a Chinese design-and-workflow guide mapping components, trust boundaries, data models, scan/sanitize/verify flows, testing, release, and extension procedures.
+
 ## [0.1.0] - 2026-09-13
 
 ### Added

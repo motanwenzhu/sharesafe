@@ -3,6 +3,8 @@
 Status: v0.1 architecture baseline
 Audience: contributors, reviewers, and integrators
 
+Chinese companion: [设计方案与各部分流程](design-and-workflows.zh-CN.md) · [详细使用手册](user-guide.zh-CN.md)
+
 ## System intent
 
 ShareSafe is an evidence-producing privacy gate placed immediately before a file leaves a trusted local boundary. It has two layers:
