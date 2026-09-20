@@ -1,6 +1,6 @@
 # ShareSafe architecture
 
-Status: v0.1 architecture baseline
+Status: v0.3 architecture baseline
 Audience: contributors, reviewers, and integrators
 
 Chinese companion: [设计方案与各部分流程](design-and-workflows.zh-CN.md) · [详细使用手册](user-guide.zh-CN.md)
@@ -9,7 +9,7 @@ Chinese companion: [设计方案与各部分流程](design-and-workflows.zh-CN.m
 
 ShareSafe is an evidence-producing privacy gate placed immediately before a file leaves a trusted local boundary. It has two layers:
 
-1. a deterministic Python CLI that discovers bytes, invokes bounded adapters, records masked findings and coverage gaps, creates narrowly sanitized copies, and verifies output; and
+1. a deterministic Python CLI that discovers bytes, invokes bounded adapters, records masked findings and coverage gaps, creates narrowly sanitized copies, builds explicitly planned share bundles, and verifies output; and
 2. a thin Codex Skill that selects the safe CLI workflow, preserves user authorization, and explains uncertainty without inventing stronger guarantees.
 
 The Skill is not the scanner. Privacy-critical detection, masking, path checks, exit codes, and report serialization live in testable code.
@@ -44,6 +44,10 @@ sanitize: input -> validate distinct destination -> transform copy
 
 verify: original summary + independent candidate scan
         -> comparison/coverage decision -> verification report
+
+prepare: strict decisions + complete source inventory -> bound plan
+         -> masked inspection -> exact approval -> private staging
+         -> exclusive new bundle -> exact relations + final scan
 ```
 
 Nothing in this flow authorizes publication. The final consumer—human, CI policy, or agent—must interpret findings and gaps in context.
@@ -71,6 +75,12 @@ skills/sharesafe/
       adapters/                    # format-specific byte inspection
       sanitize.py                  # copy-only transformation orchestration
       verify.py                    # original/candidate comparison
+      prepare_decisions.py         # strict local-only decision input
+      prepare_plan.py              # inventory, bindings, action contracts, approval
+      prepare_io.py                # private control writes and private temp directory
+      prepare.py                   # approved staging, commit, exact verify, final scan
+      safe_io.py                   # descriptor reads and directory checkpoints
+      report_hygiene.py            # masked field and complete-JSON byte budgets
 tests/                             # synthetic unit and integration tests
 docs/                              # design, architecture, and research records
 ```
@@ -115,15 +125,15 @@ The archive adapter treats member names as virtual labels, never as extraction d
 
 OOXML (`.docx`, `.xlsx`, `.pptx` and detected package variants) is inspected as a constrained ZIP/XML package without launching Office software. The adapter examines every bounded XML/relationship part, scans all part names and non-XML parts, and recognizes core/app/custom properties plus selected indicators such as comments, tracked changes, speaker notes, hidden worksheets/slides, macros, signatures, external data, custom XML, and embedded/ActiveX parts. DTD/entity-bearing or malformed XML is incomplete; raw malformed XML receives a bounded fallback text scan. Opaque embedded objects are reported but not interpreted or rewritten.
 
-“Detected” and “removed” are separate capabilities. v0.1 sanitization is limited to high-confidence document properties; it does not automatically delete comments, revisions, notes, hidden content, macros, signatures, external links, embedded objects, or body text.
+“Detected” and “removed” are separate capabilities. Sanitization is limited to high-confidence document properties; it does not automatically delete comments, revisions, notes, hidden content, macros, signatures, external links, embedded objects, or body text.
 
 ### PDF adapter
 
-PDF inspection combines conservative built-in metadata/structure signals with optional parser-based text extraction. With a compatible `pypdf`, ShareSafe can inspect accessible page text, but deep structure remains partial in v0.1. It does not render pages, run OCR, rewrite PDF metadata, or perform true redaction. Encryption, parser failure, inaccessible representations, or missing dependency produces incomplete coverage. Sanitization may copy a PDF unchanged into a release tree, but records the PDF transform as unsupported.
+PDF inspection combines conservative built-in metadata/structure signals with optional parser-based text extraction. With a compatible `pypdf`, ShareSafe can inspect accessible page text, but deep structure remains partial. It does not render pages, run OCR, rewrite PDF metadata, or perform true redaction. Encryption, parser failure, inaccessible representations, or missing dependency produces incomplete coverage. Sanitization may copy a PDF unchanged into a release tree, but records the PDF transform as unsupported.
 
 ### Image adapter
 
-JPEG and PNG adapters inspect supported metadata/container structures; Pillow can add deeper parsing and metadata-rewrite capability. PNG parsing caps total chunks and applies one cumulative budget to strictly validated zTXt/iTXt decompression. With Pillow, v0.1 can also perform limited metadata inspection of detected TIFF and WebP inputs, but it does not sanitize those formats. Pixels remain unchanged and are not OCR-scanned. Metadata removal cannot establish that visible personal information, embedded watermarks, or steganographic content is absent.
+JPEG and PNG adapters inspect supported metadata/container structures; Pillow can add deeper parsing and metadata-rewrite capability. PNG parsing caps total chunks and applies one cumulative budget to strictly validated zTXt/iTXt decompression. With Pillow, ShareSafe can also perform limited metadata inspection of detected TIFF and WebP inputs, but it does not sanitize those formats. Pixels remain unchanged and are not OCR-scanned. Metadata removal cannot establish that visible personal information, embedded watermarks, or steganographic content is absent.
 
 ## Detection and masking boundary
 
@@ -158,6 +168,8 @@ else                                    -> no_findings
 
 An incomplete report retains all findings discovered before the gap.
 
+Report fields, retained findings/gaps/errors, and complete serialized JSON have independent limits. If a scan report exceeds its byte budget, `ReportBuilder` returns a small valid `incomplete` report carrying `report_size_limit`; it never writes a truncated JSON prefix. Prepare results apply a second envelope budget: detailed actions/issues are bounded, omission counts remain explicit, the embedded final scan may be summarized by a reporting gap, and exit code `2` is forced. This fallback is constructed before stdout or report-file publication, including when the output directory has already been committed.
+
 ## Resource model
 
 `limits.py` is a security boundary, not a performance tuning afterthought. Limits cover total file bytes, searchable text/XML bytes, archive member count, per-member bytes, total expanded bytes, compression ratio, nesting depth, and retained findings per artifact/run. Format-specific hard caps additionally bound PNG chunk traversal.
@@ -177,9 +189,30 @@ Sanitization is a separate orchestration path, never a mode bit that gives scann
 7. set release-copy access and modification times to a fixed value where supported, and preserve only coarse executable/non-executable permissions, without claiming to normalize Windows creation/birth time or preserve ownership, ACLs, extended attributes, or alternate data streams;
 8. report transformed, unchanged, unsupported, failed, residual, and newly observed states.
 
-Source integrity should be tested by before/after run-scoped content tokens and sizes. File creation alone never changes the verdict to success. Body-text editing requires a future explicit plan-and-apply design with independent verification.
+Source integrity is tested by before/after run-scoped content tokens and sizes. File creation alone never changes the verdict to success. The prepare workflow supplies explicit plan-and-apply for its narrow allowlist; body-text editing remains outside that allowlist and requires an external format-native workflow followed by a fresh audit.
 
 The destination parent is a security boundary. Staged/new paths receive or inherit its platform access-control properties. ShareSafe does not clone source owners, ACLs, exact modes, extended attributes, alternate data streams, or every filesystem metadata field, and it does not promise to normalize Windows creation/birth time. A sanitized tree is therefore a release copy, not a backup.
+
+## Prepare pipeline
+
+Prepare control and result data have intentionally different trust classes. Decisions, plans, and approvals are `local_only_do_not_share`; plans contain a complete regular-file inventory with stable SHA-256 source bindings. Inspection and execution results are masked and omit those digests. Canonical plan/approval digests catch mismatched or stale controls but are not signatures and cannot authenticate the reviewing person against a same-account writer.
+
+Plan creation rejects an empty inventory, missing or duplicate decisions, implicit copy, unsupported action/media pairs, traversal, absolute/UNC/ADS/reserved names, trailing-dot/space ambiguity, NFC/case-fold/tree collisions, symlink/reparse/hardlink/special-file inputs, and source/target alias resurrection. Only an executable plan can receive a complete approval.
+
+Apply follows these checkpoints:
+
+1. parse and semantically revalidate plan and approval;
+2. rebuild the complete source plan and compare the bound plan digest;
+3. create a randomly named system-temporary staging root with verified owner-only permissions—POSIX effective-user mode `0700`, or a Windows protected current-user-only DACL whose ACE inherits to child files and directories;
+4. read every source through descriptor identity checks and execute only the plan's allow-listed relation;
+5. verify the staged inventory, directories, media types, sizes, and expected bytes;
+6. recheck the source plan, then reserve an absent output directory and exclusively create every child without replacing a concurrent entry;
+7. verify the committed output, run the final scanner with the same temporary HMAC key used for expected-byte tokens, compare the scanner's actual file-read signatures, and verify the tree again;
+8. return a bounded masked result. Any relation, scan binding, coverage, or reporting-budget problem is incomplete.
+
+Staging lives outside the destination parent so replacing that parent cannot redirect pre-commit payload writes. Publication and cleanup still use repeated parent/directory identity checkpoints, not portable directory-handle anchoring. The gap between a successful checkpoint and the next path operation remains a documented race against a sufficiently privileged concurrent local actor. After output reservation, failures set `output_may_exist`; the random incomplete marker prevents a partial tree from looking complete, and ShareSafe does not recursively delete a path whose identity can no longer be established.
+
+Standalone `prepare verify` requires the bound source as well as the plan and output. This is necessary because a digest-only plan cannot independently prove that OOXML relationships/content or image pixel/container facets outside the permitted metadata change were preserved.
 
 ## Verification
 
@@ -199,6 +232,7 @@ The companion Skill should:
 - default to `scan`;
 - explain findings and every gap without requesting raw evidence;
 - use `sanitize` only when the user authorizes creation of a distinct output;
+- use `prepare plan -> inspect -> approve -> apply` for an explicit multi-file boundary, keeping control artifacts local and treating approval as a separate authorization point;
 - never edit original/body content on ShareSafe's behalf;
 - verify/rescan before discussing release readiness;
 - avoid the words “safe,” “clean,” “certified,” or “compliant” as an unqualified verdict.

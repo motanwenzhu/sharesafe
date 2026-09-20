@@ -16,7 +16,7 @@
         "id": {"type": "string", "pattern": "^run-[0-9a-f]{16}$"},
         "started_at": {"type": "string", "format": "date-time"},
         "offline": {"const": true},
-        "report_mode": {"enum": ["shareable", "local"]},
+        "report_mode": {"enum": ["local_masked", "share_summary", "shareable", "local"]},
         "limits": {"type": "object", "additionalProperties": {"type": "integer", "minimum": 0}}
       }
     },

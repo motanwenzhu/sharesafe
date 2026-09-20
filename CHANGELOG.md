@@ -6,6 +6,43 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-09-20
+
+### Added
+
+- Added the `prepare plan`, `prepare inspect`, `prepare approve`, `prepare apply`, and `prepare verify` workflow for constructing a new directory from complete explicit per-file decisions.
+- Added strict local-only decision, plan, and approval schemas plus masked control-write, inspection, and result schemas.
+- Added allow-listed copy, omit, rename, and OOXML/PNG/JPEG metadata-strip actions with exact source binding and output-relation verification.
+- Added private local control-artifact I/O: strict bounded UTF-8 JSON, duplicate/non-finite/surrogate rejection, exclusive publication, POSIX `0600`, and a verified protected current-user-only Windows DACL.
+- Added system-temporary prepare staging with verified POSIX current-user `0700` or a protected inheritable current-user-only Windows DACL.
+
+### Security
+
+- Reject empty or incomplete plans, implicit copying, path traversal/ADS/UNC/reserved/trailing-dot names, normalization/case/tree collisions, links/reparse points/hard links/special files, stale approvals, source drift, and source-path resurrection through materialized targets.
+- Reserve output directories and create every child exclusively, retain an incomplete marker across post-reservation failures, and avoid replacing renames or unsafe recursive cleanup.
+- Bind the final scanner's actual reads to expected output bytes with a shared run-scoped HMAC key, with exact tree verification both before and after the scan.
+- Bound prepare-result action and issue detail. Oversized results remain complete valid JSON, record omissions and a reporting gap, force `incomplete`, and return exit code `2` even after a successful commit.
+- Explicitly document that plan/approval digests are consistency checks rather than signatures, and that parent-path protection uses identity checkpoints rather than portable directory-handle anchoring.
+
+### Documentation and release validation
+
+- Added a detailed Chinese user guide and design/workflow manual covering decisions, approvals, apply/verify stages, recovery, exit codes, and residual trust boundaries.
+- Expanded the release artifact checker for every v0.3 runtime module, all 11 schemas, the new manuals, prepare tests, version-matched artifacts, and wheel RECORD integrity.
+- Repeated the forward evaluation from isolated wheel and sdist installations with synthetic data only.
+
+## [0.2.0] - 2026-09-16
+
+### Added
+
+- Added descriptor-bound reads, parent-directory identity checkpoints, transformation receipts, and OOXML/PNG/JPEG preserved-facet verification.
+- Added strict policy/check schemas and reproducible effective-policy receipts, `doctor --deep`, and the exact versioned `rules --detail` catalog.
+- Added bounded complete report fallbacks, centralized masked-report hygiene, and `report show`, `report diff`, and `report share-summary` commands.
+
+### Security
+
+- Removed raw content digests from masked reports in favor of run-scoped HMAC tokens and made report/path/field/finding/gap/error limits fail closed.
+- Hardened report and sanitized-output publication against parent replacement and destination takeover without overwriting competing files.
+
 ### Documentation
 
 - Added a detailed Chinese user manual covering installation, scanning, report interpretation, sanitization, verification, Codex Skill usage, CI integration, limits, and troubleshooting.
@@ -45,5 +82,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - Added bilingual quick starts, support matrix, security policy, threat model, architecture, research notes, contribution rules, and third-party notices.
 
-[Unreleased]: https://github.com/motanwenzhu/sharesafe/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/motanwenzhu/sharesafe/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/motanwenzhu/sharesafe/compare/v0.2.0...v0.3.0
+[0.2.0]: https://github.com/motanwenzhu/sharesafe/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/motanwenzhu/sharesafe/releases/tag/v0.1.0

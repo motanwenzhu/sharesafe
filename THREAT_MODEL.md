@@ -1,11 +1,11 @@
 # ShareSafe threat model
 
-Status: v0.1 design baseline
-Last reviewed: 2026-09-14
+Status: v0.3 design baseline
+Last reviewed: 2026-09-17
 
 ## Purpose
 
-ShareSafe is a local pre-share privacy gate. It inspects files and bundles, reports likely disclosure risks, identifies checks it could not complete, optionally removes a narrow set of high-confidence metadata into a new copy, and rescans that output.
+ShareSafe is a local pre-share privacy gate. It inspects files and bundles, reports likely disclosure risks, identifies checks it could not complete, optionally removes a narrow set of high-confidence metadata into a new copy, and can build a new directory from complete explicit per-file decisions before rescanning and relation verification.
 
 The central safety statement is:
 
@@ -23,7 +23,9 @@ ShareSafe aims to protect:
 - author, company, GPS, camera, producer, revision, and similar metadata;
 - material hidden in comments, tracked changes, speaker notes, hidden sheets/slides, package parts, filenames, or nested archives;
 - the confidentiality of the scan itself, including reports and diagnostics;
+- the confidentiality and integrity classification of prepare decisions, plans, and approvals;
 - integrity of original inputs during sanitization;
+- exact membership and permitted byte relations of a prepared output directory;
 - the reliability of release automation consuming the result.
 
 ## Actors and trust boundaries
@@ -38,7 +40,8 @@ The main trust boundaries are:
 2. **Raw bytes to format adapter.** Parsers process attacker-controlled structures and can fail, allocate excessively, or expose only partial content.
 3. **Raw evidence to finding/report boundary.** A correct detector can still create a second leak if evidence is serialized without masking.
 4. **Original to sanitized copy.** Transformations can lose content, preserve hidden content, overwrite an input, or claim more than they accomplished.
-5. **CLI to automation or agent.** Exit codes and JSON can be misinterpreted as permission to publish.
+5. **Source/control/staging to prepared bundle.** A plan can be stale or tampered with, a path can be ambiguous, staging can disclose bytes, and a concurrent filesystem actor can replace parents or inject output entries.
+6. **CLI to automation or agent.** Exit codes and JSON can be misinterpreted as permission to publish.
 
 Normal ShareSafe adapters are designed without a network boundary: they do not need a remote service and must not transfer file content.
 
@@ -55,6 +58,8 @@ The model includes both malicious inputs and ordinary mistakes:
 - an automation checks only process success and ignores coverage;
 - a local attacker supplies a crafted file to exhaust resources or exploit a parser;
 - a sanitizer preserves a residual signal or creates a new one.
+- a same-account process rewrites plan and approval controls together or races a checkpoint-based path operation;
+- an oversized result causes a consumer to miss omitted actions, issues, findings, or gaps.
 
 ## Security goals
 
@@ -76,7 +81,7 @@ Default scanning is read-only. Sanitization writes only to a distinct destinatio
 
 ### G5 — Narrow, observable transformation
 
-v0.1 sanitization may remove only documented high-confidence metadata. It must not silently rewrite body text, resolve disclosure policy, or imply true redaction. Every output is rescanned; residual findings and gaps remain visible.
+Sanitization may remove only documented high-confidence metadata. It must not silently rewrite body text, resolve disclosure policy, or imply true redaction. Every output is rescanned; residual findings and gaps remain visible.
 
 ### G6 — Bounded hostile-input handling
 
@@ -86,9 +91,13 @@ Directory and archive traversal must enforce bounded nesting, entry count, decom
 
 JSON has a versioned schema and stderr/stdout separation appropriate for machines. Exit code `2` represents incomplete coverage and takes precedence over ordinary findings. Invalid or unsafe operations fail closed.
 
+### G8 — Explicit, bound bundle construction
+
+Prepare must inventory every regular source file, require one explicit action per file, bind source bytes, separate masked review from sensitive controls, require complete approval, stage privately, publish without replacement, and verify both exact planned relations and the final scanner's actual byte snapshot. Any report truncation or mismatch is incomplete.
+
 ## Threats and mitigations
 
-| Threat | v0.1 mitigation | Residual risk |
+| Threat | v0.3 mitigation | Residual risk |
 |---|---|---|
 | Visible PII or credentials | Deterministic pattern rules, validation where practical, severity/confidence, masked findings | Contextual identifiers and unknown key formats can be missed |
 | Sensitive filename/path | Inspect selected root, file, empty-directory, and container-entry names; mask user/host/path components and remove the absolute scan root | Non-empty parent directories are represented through descendant paths; filesystem side channels remain outside the report |
@@ -101,6 +110,12 @@ JSON has a versioned schema and stderr/stdout separation appropriate for machine
 | Report becomes a second leak | Mask at finding creation, normalize separator variants for matching, and emit path-free CLI errors | New rules can violate the boundary without tests/review |
 | Input overwrite or output-inside-input recursion | Distinct output requirement and canonical path checks | Concurrent filesystem changes and unusual filesystem semantics remain possible |
 | Sanitization creates false confidence | Narrow transform list, copy-only behavior, mandatory rescan | Absence of a detected residual is still not proof of removal |
+| Stale/tampered prepare controls | Canonical plan/approval digests, full action-ID approval, source re-inventory and SHA-256 rebinding | Digests are not signatures; a same-account writer can recompute all controls |
+| Omitted/renamed path recreated elsewhere | Portable normalized tree-collision and source/target alias checks | Case/normalization semantics on unusual filesystems can still differ |
+| Staging leaks source bytes | Random system-temp root, verified POSIX owner/mode or Windows protected inheritable current-user DACL, fail before output reservation if unprovable | Administrator, compromised OS, endpoint monitor, swap, journal, or backup can still observe bytes |
+| Concurrent output injection or parent replacement | Repeated directory identity checkpoints, exclusive directory/file creation, incomplete marker, no replacing rename, before/after exact verification | Cross-platform directory-handle anchoring is not implemented; a sufficiently privileged concurrent actor can race between checkpoints |
+| Final scan sees different bytes than relation verifier | Shared run-scoped HMAC tokens bind scanner reads to expected bytes; exact tree verification runs before and after scan | Filesystem is not made immutable after the final checkpoint |
+| Result exceeds output budget | Complete bounded fallback, explicit omission counts and reporting gap, forced `incomplete`/exit `2` | Detail must be regenerated with a larger budget or reviewed locally; the bounded result cannot carry omitted evidence |
 | Active content execution | Parse bytes only; never run macros/scripts/formulas or fetch links | Third-party parser vulnerabilities remain possible |
 | CI incorrectly publishes | Stable verdict/coverage/exit codes; incomplete precedence | A consumer can still ignore documented semantics |
 
@@ -108,7 +123,7 @@ JSON has a versioned schema and stderr/stdout separation appropriate for machine
 
 Coverage is recorded per artifact as `complete`, `partial`, `unsupported`, or `not_applicable`.
 
-- `complete` means all v0.1 checks claimed for that artifact and installed capability completed. It does not mean all possible privacy checks exist.
+- `complete` means all checks claimed for that artifact and installed capability completed. It does not mean all possible privacy checks exist.
 - `partial` means some relevant inspection ran and some did not.
 - `unsupported` means ShareSafe has no applicable adapter or cannot inspect a relevant representation.
 - `not_applicable` means a named capability genuinely does not apply; it must not be used as a softer synonym for unsupported.
@@ -128,18 +143,24 @@ For a sanitization operation that reaches output creation, ShareSafe intends to 
 
 ShareSafe does **not** guarantee secure erasure, byte-for-byte preservation of non-metadata structures, visual fidelity across all viewers, removal of body-text PII, irreversible redaction, or anonymity of the resulting file.
 
-PDF transformation is unsupported in v0.1. A PDF can be copied unchanged as part of an output tree, but that action is not PDF sanitization and remains visible as unsupported/incomplete.
+PDF transformation is unsupported. A PDF can be copied unchanged as part of an output tree, but that action is not PDF sanitization and remains visible as unsupported/incomplete.
 
 Sanitized output is also not a filesystem-faithful backup. ShareSafe sets access and modification times to a fixed value where the platform permits, but it does not promise to normalize Windows creation/birth time. Only executable/non-executable permission class is preserved where meaningful. Exact modes, ownership, ACLs, extended attributes, alternate data streams, and other platform-specific metadata are neither guaranteed to be copied nor guaranteed to be sanitized. Output receives or inherits access-control properties from the chosen destination parent according to the operating system, so that parent is part of the user's trust boundary.
 
-## Out of scope for v0.1
+## Prepare guarantees and residual risk
+
+An executable prepare operation intends to guarantee that the source still matches the complete bound inventory, every action was covered by the exact approval, every materialized file has the planned path/media/byte relation, omitted paths are absent, and the committed output was rescanned. Transform actions must actually remove supported metadata and pass preserved-format-facet receipts; a no-op is not reported as applied.
+
+Prepare does not guarantee that approval represents a particular human, that plan history is non-repudiable, that another process with the same account cannot replace all local controls, that output access control matches the source, or that the output stays unchanged after the last check. Parent and cleanup operations use identity checkpoints, not portable directory handles. An error after destination reservation may intentionally leave an incomplete marked directory for manual inspection; ShareSafe will not recursively delete through an identity-uncertain path.
+
+## Out of scope for v0.3
 
 - OCR and semantic inspection of pixels, handwriting, audio, video, or scanned PDF pages.
 - Malware detection and safe execution of active content.
 - Steganography, watermark, font fingerprint, printer mark, or forensic provenance detection.
 - Complete interpretation of macros, formulas, embedded objects, external links, digital signatures, or every vendor-specific document extension.
 - True PDF/content redaction and legal disclosure review.
-- PDF metadata rewriting in v0.1.
+- PDF metadata rewriting.
 - Preventing a compromised OS, Python runtime, dependency, administrator, endpoint monitor, or backup service from reading inputs.
 - Protecting shell history, terminal scrollback, filesystem journals, swap, caches, cloud-sync folders, backups, or copies created by other applications.
 - Proving compliance with GDPR, HIPAA, CCPA, export controls, discovery rules, or organizational policy.
@@ -153,7 +174,7 @@ Users must also protect reports. Although evidence and byte identity are represe
 
 ## Validation strategy
 
-Security invariants require synthetic regression tests for raw-evidence absence, absolute-path absence, deterministic IDs, malformed/encrypted/unsupported inputs, resource limits, archive traversal, unsafe output relationships, original preservation, mandatory rescan, and exit-code precedence. Forward behavioral testing of the Codex Skill must check that it communicates uncertainty and does not broaden sanitization without authorization; the current reproducible record is [docs/skill-evaluation.md](docs/skill-evaluation.md).
+Security invariants require synthetic regression tests for raw-evidence absence, absolute-path absence, deterministic IDs, malformed/encrypted/unsupported inputs, resource/report limits, archive traversal, unsafe output relationships, original preservation, mandatory rescan, prepare control tampering, source drift, path collision/resurrection, private staging, commit races, scan-snapshot substitution, and exit-code precedence. Forward behavioral testing of the Codex Skill must check that it communicates uncertainty, separates review from approval, and does not broaden write authorization; the current reproducible record is [docs/skill-evaluation.md](docs/skill-evaluation.md).
 
 ## Change control
 

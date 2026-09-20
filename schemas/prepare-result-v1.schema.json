@@ -1,0 +1,183 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:sharesafe:schema:prepare-result:v1",
+  "title": "ShareSafe masked prepare result v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "tool",
+    "operation",
+    "source",
+    "output",
+    "plan_summary",
+    "actions",
+    "commit",
+    "verification",
+    "final_scan",
+    "reporting",
+    "ready_for_review",
+    "statement"
+  ],
+  "properties": {
+    "schema": {"const": "sharesafe.prepare-result/v1"},
+    "tool": {"$ref": "urn:sharesafe:schema:report:v1#/$defs/tool"},
+    "operation": {"enum": ["apply", "verify"]},
+    "source": {"const": "<selected-source>"},
+    "output": {"const": "<new-bundle>"},
+    "plan_summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "action_count",
+        "action_counts",
+        "action_results_reported",
+        "action_results_omitted"
+      ],
+      "properties": {
+        "action_count": {"type": "integer", "minimum": 1, "maximum": 999999},
+        "action_counts": {
+          "type": "object",
+          "additionalProperties": {"type": "integer", "minimum": 1, "maximum": 999999},
+          "propertyNames": {
+            "enum": [
+              "copy_unchanged",
+              "strip_ooxml_metadata",
+              "strip_png_metadata",
+              "strip_jpeg_metadata",
+              "omit_from_boundary",
+              "rename_in_bundle",
+              "manual_or_external_required",
+              "block"
+            ]
+          }
+        },
+        "action_results_reported": {"type": "integer", "minimum": 0, "maximum": 999999},
+        "action_results_omitted": {"type": "integer", "minimum": 0, "maximum": 999999}
+      }
+    },
+    "actions": {
+      "type": "array",
+      "maxItems": 999999,
+      "items": {"$ref": "#/$defs/actionResult"}
+    },
+    "commit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["state", "mode"],
+      "properties": {
+        "state": {"enum": ["committed", "not_applicable"]},
+        "mode": {"type": ["string", "null"], "maxLength": 128}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"state": {"const": "committed"}}, "required": ["state"]},
+          "then": {"properties": {"mode": {"type": "string", "minLength": 1}}}
+        },
+        {
+          "if": {"properties": {"state": {"const": "not_applicable"}}, "required": ["state"]},
+          "then": {"properties": {"mode": {"type": "null"}}}
+        }
+      ]
+    },
+    "verification": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "outcome",
+        "source_snapshot",
+        "expected_files",
+        "observed_files",
+        "issue_count",
+        "issues_reported",
+        "issues_omitted",
+        "issues"
+      ],
+      "properties": {
+        "outcome": {"enum": ["verified", "incomplete"]},
+        "source_snapshot": {"const": "matched"},
+        "expected_files": {"type": "integer", "minimum": 0, "maximum": 999999},
+        "observed_files": {"type": "integer", "minimum": 0, "maximum": 999999},
+        "issue_count": {"type": "integer", "minimum": 0, "maximum": 999999},
+        "issues_reported": {"type": "integer", "minimum": 0, "maximum": 999999},
+        "issues_omitted": {"type": "integer", "minimum": 0, "maximum": 999999},
+        "issues": {
+          "type": "array",
+          "maxItems": 999999,
+          "items": {"$ref": "#/$defs/issue"}
+        }
+      }
+    },
+    "final_scan": {"$ref": "urn:sharesafe:schema:report:v1"},
+    "reporting": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["detail", "final_scan_detail", "max_bytes"],
+      "properties": {
+        "detail": {"enum": ["complete", "truncated"]},
+        "final_scan_detail": {"enum": ["complete", "summarized"]},
+        "max_bytes": {"type": "integer", "minimum": 4096}
+      }
+    },
+    "ready_for_review": {"type": "boolean"},
+    "statement": {"type": "string", "minLength": 1, "maxLength": 1024}
+  },
+  "$defs": {
+    "maskedPath": {"type": "string", "minLength": 1, "maxLength": 16384},
+    "actionResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "action_id",
+        "source_path",
+        "target_path",
+        "action",
+        "status",
+        "relation"
+      ],
+      "properties": {
+        "action_id": {"type": "string", "pattern": "^prepare-action-[0-9]{6}$"},
+        "source_path": {"$ref": "#/$defs/maskedPath"},
+        "target_path": {
+          "oneOf": [
+            {"$ref": "#/$defs/maskedPath"},
+            {"type": "null"}
+          ]
+        },
+        "action": {
+          "enum": [
+            "copy_unchanged",
+            "strip_ooxml_metadata",
+            "strip_png_metadata",
+            "strip_jpeg_metadata",
+            "omit_from_boundary",
+            "rename_in_bundle"
+          ]
+        },
+        "status": {"enum": ["applied", "verified"]},
+        "relation": {
+          "enum": [
+            "byte_identical",
+            "metadata_reduced_format_preserved",
+            "absent_from_output"
+          ]
+        }
+      }
+    },
+    "issue": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "action_id", "path"],
+      "properties": {
+        "code": {"type": "string", "pattern": "^[a-z][a-z0-9_]*$", "maxLength": 128},
+        "action_id": {
+          "oneOf": [
+            {"type": "string", "pattern": "^prepare-action-[0-9]{6}$"},
+            {"type": "null"}
+          ]
+        },
+        "path": {"$ref": "#/$defs/maskedPath"}
+      }
+    }
+  }
+}

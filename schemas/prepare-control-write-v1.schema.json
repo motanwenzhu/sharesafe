@@ -1,0 +1,75 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:sharesafe:schema:prepare-control-write:v1",
+  "title": "ShareSafe local prepare control write receipt v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "operation",
+    "artifact",
+    "classification",
+    "created",
+    "item_count",
+    "executable",
+    "storage"
+  ],
+  "properties": {
+    "schema": {"const": "sharesafe.prepare-control-write/v1"},
+    "operation": {"enum": ["plan", "approve"]},
+    "artifact": {"enum": ["<local-plan>", "<local-approval>"]},
+    "classification": {"const": "local_only_do_not_share"},
+    "created": {"const": true},
+    "item_count": {"type": "integer", "minimum": 0, "maximum": 999999},
+    "executable": {"type": "boolean"},
+    "storage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "artifact_kind",
+        "classification",
+        "bytes_written",
+        "owner_only_verified",
+        "permission_control",
+        "atomic_publish",
+        "parent_directory_identity_checkpoints",
+        "parent_directory_handle_anchoring"
+      ],
+      "properties": {
+        "artifact_kind": {"enum": ["plan", "approval"]},
+        "classification": {"const": "local_only_do_not_share"},
+        "bytes_written": {"type": "integer", "minimum": 1, "maximum": 33554432},
+        "owner_only_verified": {"const": true},
+        "permission_control": {
+          "enum": [
+            "posix_owner_mode_0600",
+            "windows_protected_current_user_dacl"
+          ]
+        },
+        "atomic_publish": {"const": "same_directory_hardlink_create_new"},
+        "parent_directory_identity_checkpoints": {"const": true},
+        "parent_directory_handle_anchoring": {"const": false}
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"operation": {"const": "plan"}}, "required": ["operation"]},
+      "then": {
+        "properties": {
+          "artifact": {"const": "<local-plan>"},
+          "storage": {"properties": {"artifact_kind": {"const": "plan"}}}
+        }
+      }
+    },
+    {
+      "if": {"properties": {"operation": {"const": "approve"}}, "required": ["operation"]},
+      "then": {
+        "properties": {
+          "artifact": {"const": "<local-approval>"},
+          "storage": {"properties": {"artifact_kind": {"const": "approval"}}}
+        }
+      }
+    }
+  ]
+}

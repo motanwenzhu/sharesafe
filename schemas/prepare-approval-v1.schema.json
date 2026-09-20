@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:sharesafe:schema:prepare-approval:v1",
+  "title": "ShareSafe local prepare approval v1",
+  "description": "Sensitive local-only approval bound to one exact prepare plan. Do not upload or share.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "classification",
+    "status",
+    "plan_digest",
+    "approved_action_ids",
+    "approval_digest"
+  ],
+  "properties": {
+    "schema": {"const": "sharesafe.prepare-approval/v1"},
+    "classification": {"const": "local_only_do_not_share"},
+    "status": {"const": "approved_for_apply"},
+    "plan_digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "approved_action_ids": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 999999,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^prepare-action-[0-9]{6}$"
+      }
+    },
+    "approval_digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    }
+  }
+}

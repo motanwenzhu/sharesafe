@@ -7,6 +7,7 @@ from collections.abc import Iterable
 from typing import Any
 
 from .models import artifact_map, stable_id
+from .receipts import TransformReceipt, bind_and_validate_receipt, trusted_receipts
 
 
 _OOXML_MEDIA_TYPES = {
@@ -56,8 +57,8 @@ def _index_findings(report: dict[str, Any]) -> dict[str, dict[str, Any]]:
     return indexed
 
 
-def _applied_actions(actions: Iterable[dict[str, Any]] | None) -> dict[str, set[str]]:
-    by_path: dict[str, set[str]] = defaultdict(set)
+def _applied_actions(actions: Iterable[dict[str, Any]] | None) -> dict[str, list[str]]:
+    by_path: dict[str, list[str]] = defaultdict(list)
     for record in actions or ():
         path = record.get("path")
         action = record.get("action")
@@ -66,7 +67,7 @@ def _applied_actions(actions: Iterable[dict[str, Any]] | None) -> dict[str, set[
             and isinstance(path, str)
             and action in _ACTION_MEDIA_TYPES
         ):
-            by_path[path].add(action)
+            by_path[path].append(action)
     return dict(by_path)
 
 
@@ -87,15 +88,25 @@ def _allowed_transform(
     path: str,
     before: dict[str, Any],
     after: dict[str, Any],
-    actions: dict[str, set[str]],
-) -> str | None:
+    actions: dict[str, list[str]],
+) -> list[str]:
     before_type = before.get("media_type")
     if before_type != after.get("media_type"):
-        return None
-    for action in sorted(actions.get(path, ())):
-        if before_type in _ACTION_MEDIA_TYPES[action]:
-            return action
-    return None
+        return []
+    return sorted(
+        action
+        for action in actions.get(path, ())
+        if before_type in _ACTION_MEDIA_TYPES[action]
+    )
+
+
+def _receipt_groups(
+    receipts: Iterable[TransformReceipt],
+) -> dict[tuple[str, str], list[TransformReceipt]]:
+    groups: dict[tuple[str, str], list[TransformReceipt]] = defaultdict(list)
+    for receipt in receipts:
+        groups[(receipt.relative_path, receipt.action_kind)].append(receipt)
+    return dict(groups)
 
 
 def _compare_artifacts(
@@ -103,6 +114,8 @@ def _compare_artifacts(
     after: dict[str, Any],
     actions: Iterable[dict[str, Any]] | None,
 ) -> dict[str, Any]:
+    receipts = trusted_receipts(actions)
+    receipt_groups = _receipt_groups(receipts)
     before_artifacts = before.get("artifacts", [])
     after_artifacts = after.get("artifacts", [])
     before_groups = _artifact_groups(before)
@@ -173,8 +186,51 @@ def _compare_artifacts(
         if _artifact_signature(original) == _artifact_signature(prepared):
             unchanged += 1
             continue
-        action = _allowed_transform(path, original, prepared, applied)
-        if action is not None:
+        candidate_actions = _allowed_transform(path, original, prepared, applied)
+        if len(candidate_actions) > 1:
+            issues.append({
+                "code": "transform_action_ambiguous",
+                "path": path,
+                "detail": "More than one applied transform record claims the same artifact change.",
+            })
+            continue
+        if candidate_actions:
+            action = candidate_actions[0]
+            matching_receipts = receipt_groups.get((path, action), [])
+            if not matching_receipts:
+                issues.append({
+                    "code": "transform_receipt_missing",
+                    "path": path,
+                    "detail": "An applied transform record has no core-issued byte-bound receipt.",
+                })
+                continue
+            if len(matching_receipts) != 1:
+                issues.append({
+                    "code": "transform_receipt_ambiguous",
+                    "path": path,
+                    "detail": "Transform receipts do not identify exactly one operation for this artifact.",
+                })
+                continue
+            receipt = matching_receipts[0]
+            if receipt.status != "applied":
+                issues.append({
+                    "code": "transform_receipt_status_mismatch",
+                    "path": path,
+                    "detail": "The action record and its internal transform receipt disagree on status.",
+                })
+                continue
+            receipt_failure = bind_and_validate_receipt(
+                receipt,
+                before_artifact=original,
+                after_artifact=prepared,
+            )
+            if receipt_failure is not None:
+                issues.append({
+                    "code": receipt_failure,
+                    "path": path,
+                    "detail": "The transform receipt did not validate against exact scan snapshots and protected content.",
+                })
+                continue
             allowed.append({
                 "path": path,
                 "action": action,

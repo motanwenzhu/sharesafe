@@ -95,7 +95,7 @@ def scan_pdf(
         artifact,
         "structure",
         "pdf_deep_validation_partial",
-        "Incremental revisions and every possible attachment or action are not exhaustively validated in v0.1.",
+        "ShareSafe does not exhaustively validate incremental revisions or every possible attachment and action.",
     )
     if _pdf_token_present(data, b"/Encrypt"):
         builder.add_finding(

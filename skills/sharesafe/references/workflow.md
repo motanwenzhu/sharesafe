@@ -29,7 +29,31 @@ Honor the process exit code together with the JSON body:
 
 Do not infer that a lower finding count means an artifact is safe. Lead with blocking findings and gaps, then review-level findings and available remediation options.
 
-## Create a sanitized copy
+## Build an explicit share bundle
+
+Use `prepare` for a directory boundary that may include copies, omissions, renames, and supported metadata stripping. Decisions must cover the complete source inventory; ShareSafe never infers an ignore list or copies an undecided file.
+
+Keep `DECISIONS.json`, `PLAN.json`, and `APPROVAL.json` local. They may contain filenames and stable SHA-256 source bindings and are deliberately outside the masked-report contract.
+
+```text
+python <skill-dir>/scripts/run_sharesafe.py prepare plan SOURCE --decisions DECISIONS.json --out-plan PLAN.json --json
+python <skill-dir>/scripts/run_sharesafe.py prepare inspect PLAN.json --json
+python <skill-dir>/scripts/run_sharesafe.py prepare approve PLAN.json --out-approval APPROVAL.json --approve-all --json
+python <skill-dir>/scripts/run_sharesafe.py prepare apply PLAN.json --approval APPROVAL.json --source SOURCE --out NEW_BUNDLE --json
+python <skill-dir>/scripts/run_sharesafe.py prepare verify PLAN.json --source SOURCE --output NEW_BUNDLE --json
+```
+
+The decisions document must use schema `sharesafe.prepare-decisions/v1`, classification `local_only_do_not_share`, source boundary `<selected-source>`, and one explicit action for every regular source file. Only `copy_unchanged`, `rename_in_bundle`, `omit_from_boundary`, and the format-matched OOXML/PNG/JPEG strip actions are executable. `manual_or_external_required` and `block` deliberately make a plan non-executable.
+
+Always inspect before approval. `--approve-all` approves the complete exact plan; partial approval is not supported. Approval binds the plan digest and action IDs, but its checksum is not a signature or protection from another process with the same local write authority.
+
+`apply` writes only to a new absent directory. It rechecks the source binding, builds in a private system-temporary staging directory, verifies the staged relations, reserves the output without replacement, verifies the committed tree, performs a final scan bound to the same run-scoped content key, and verifies the tree again. Windows staging uses a protected current-user-only inheritable DACL; POSIX staging is verified as current-user mode `0700`. Destination security properties still come from the chosen destination parent.
+
+`verify` requires both the plan and the original source. The source is necessary to recompute transformed bytes and preserved format facets; the plan alone is not sufficient evidence. Treat a `prepare-result` whose `reporting.detail` is `truncated`, whose final scan is incomplete, or whose verification contains issues as incomplete even when the new directory exists. A bounded result may omit detailed action or issue records and records those omitted counts explicitly.
+
+Parent-directory operations use repeated identity checkpoints rather than cross-platform directory-handle anchoring. A concurrent same-account actor remains outside the strongest guarantee; see [security-boundaries.md](security-boundaries.md).
+
+## Create a single sanitized copy
 
 Sanitization is an opt-in write operation:
 
@@ -41,12 +65,12 @@ Before running it:
 
 1. Resolve the input and output paths.
 2. Verify that the output is distinct from the input and does not already exist.
-3. State that ShareSafe v0.1 removes only supported metadata; it does not rewrite body text or promise removal of comments, revisions, notes, macros, attachments, hidden sheets/slides, or external links. It never rewrites PDF files.
+3. State that ShareSafe removes only supported metadata; it does not rewrite body text or promise removal of comments, revisions, notes, macros, attachments, hidden sheets/slides, or external links. It never rewrites PDF files.
 4. Do not broaden a request to sanitize one artifact into sanitizing its parent folder or repository.
 
 The sanitizer must create a copy and rescan it. Accept the operation as complete only when the returned report includes the post-sanitization scan. If that evidence is absent, run a separate scan of the new output and describe the missing automatic verification as a tool defect. Residual findings or gaps remain blockers; successful file creation is not verification.
 
-For PDF input, `pypdf` only enhances text extraction and basic-structure inspection during scans. Its presence never enables PDF transformation. The v0.1 sanitizer copies PDF bytes unchanged, records the PDF action as `unsupported`, and preserves detected PDF risks as residual findings in the post-copy scan. Do not describe that copy as cleaned or metadata-reduced.
+For PDF input, `pypdf` only enhances text extraction and basic-structure inspection during scans. Its presence never enables PDF transformation. The sanitizer copies PDF bytes unchanged, records the PDF action as `unsupported`, and preserves detected PDF risks as residual findings in the post-copy scan. Do not describe that copy as cleaned or metadata-reduced.
 
 Never replace, rename over, delete, or edit the original. If the destination exists, stop and ask for another destination rather than inventing permission to overwrite it.
 
@@ -72,7 +96,7 @@ Use the non-scanning commands only when their answer is relevant:
 
 ```text
 python <skill-dir>/scripts/run_sharesafe.py formats --json
-python <skill-dir>/scripts/run_sharesafe.py rules --json
+python <skill-dir>/scripts/run_sharesafe.py rules --detail --json
 python <skill-dir>/scripts/run_sharesafe.py self-test --json
 ```
 

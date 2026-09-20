@@ -11,17 +11,18 @@ ShareSafe 目前是 alpha 软件。分享敏感内容前，请同时审阅报告
 
 [English](README.md) · [详细使用手册](docs/user-guide.zh-CN.md) · [设计与流程](docs/design-and-workflows.zh-CN.md) · [格式支持矩阵](SUPPORT_MATRIX.md) · [威胁模型](THREAT_MODEL.md) · [架构](docs/architecture.md) · [调研](docs/research.md)
 
-## v0.1 解决什么问题
+## v0.3 解决什么问题
 
 - 分享前审计文本、代码、配置、OOXML（`.docx`、`.xlsx`、`.pptx`）、ZIP、PDF、JPEG 和 PNG。
 - 查找疑似个人信息、凭据、带身份信息的用户主目录/UNC 路径、身份元数据以及部分隐藏文档结构。
 - 将所选根目录和空目录纳入清单，扫描容器名称/评论，并在防御性资源上限内递归检查嵌套 ZIP。
 - 在发现结果产生的边界就遮罩敏感值，避免报告再次泄密。
 - 仅对少数高置信元数据变换创建**新副本**。
+- 按每个文件的显式复制、排除、重命名或受支持元数据移除决策，构建新的可审阅分享目录。
 - 立即重新扫描输出，并保留残余发现或覆盖不完整状态。
 - 为脚本、CI 和代理工作流提供稳定 JSON 与明确退出码。
 
-ShareSafe 不是完整的文档脱敏器。v0.1 的 `sanitize` 不改写正文，不做视觉涂黑，不运行 OCR，也不会自动删除 Office 批注、修订、演讲者备注或隐藏工作表，更不会保证所有身份线索都已消失。需要修改正文时，应使用专业脱敏工具并进行人工复核。
+ShareSafe 不是完整的文档脱敏器。`sanitize` 和 `prepare` 不改写正文，不做视觉涂黑，不运行 OCR，也不会自动删除 Office 批注、修订、演讲者备注或隐藏工作表，更不会保证所有身份线索都已消失。需要修改正文时，应使用专业脱敏工具并进行人工复核。
 
 ## 一分钟理解结果
 
@@ -80,7 +81,7 @@ py -3 -m venv .venv
 ```bash
 sharesafe doctor --json
 sharesafe formats --json
-sharesafe rules --json
+sharesafe rules --detail --json
 ```
 
 只读扫描文件或目录：
@@ -103,6 +104,18 @@ sharesafe verify ./bundle ./bundle.sanitized --json --report ./sharesafe-verify-
 
 `sanitize` 已经返回带可信变换记录的前后验证。独立 `verify` 用于保守比较另行处理的副本；它没有可认证的变换清单，因此只要字节发生变化，即使发现数减少，也仍会标记为 `unverified`。
 
+根据覆盖全部源文件的显式决策构建新目录：
+
+```bash
+sharesafe prepare plan ./source --decisions ./decisions.json --out-plan ./plan.json --json
+sharesafe prepare inspect ./plan.json --json
+sharesafe prepare approve ./plan.json --out-approval ./approval.json --approve-all --json
+sharesafe prepare apply ./plan.json --approval ./approval.json --source ./source --out ./new-bundle --json
+sharesafe prepare verify ./plan.json --source ./source --output ./new-bundle --json
+```
+
+决策、计划和批准文件都是敏感的本地控制工件，不应发布。批准前必须先审阅遮罩后的计划视图；输出必须是尚不存在的新目录。后续 `verify` 仍然需要原始源目录，因为只有源文件才能重新计算精确预期字节和格式不变量。
+
 运行内置合成数据自检：
 
 ```bash
@@ -117,8 +130,16 @@ sharesafe self-test --json
 sharesafe scan PATH [PATH ...] [--json] [--report FILE] [--fail-on LEVEL]
 sharesafe sanitize PATH --out NEW_PATH [--json] [--report FILE]
 sharesafe verify ORIGINAL PREPARED [--json] [--report FILE]
-sharesafe doctor [--json]
-sharesafe rules [--json]
+sharesafe check PATH [PATH ...] [--policy FILE] [--json] [--report FILE]
+sharesafe policy init --out NEW_FILE
+sharesafe report {show,diff,share-summary} ... --json
+sharesafe prepare plan SOURCE --decisions LOCAL_JSON --out-plan NEW_PLAN [--json]
+sharesafe prepare inspect LOCAL_PLAN [--json]
+sharesafe prepare approve LOCAL_PLAN --out-approval NEW_APPROVAL --approve-all [--json]
+sharesafe prepare apply LOCAL_PLAN --approval LOCAL_APPROVAL --source SOURCE --out NEW_DIRECTORY [--json] [--report FILE]
+sharesafe prepare verify LOCAL_PLAN --source SOURCE --output DIRECTORY [--json] [--report FILE]
+sharesafe doctor [--deep] [--json]
+sharesafe rules [--detail] [--json]
 sharesafe formats [--json]
 sharesafe self-test [--json]
 ```
@@ -126,6 +147,8 @@ sharesafe self-test [--json]
 扫描类 JSON 使用 `sharesafe.report/v1`，包含 `tool`、`run`、`summary`、`artifacts`、`findings`、`gaps`、`errors` 和 `dependencies`。展示路径使用相对路径；报告不得包含扫描根目录的绝对路径、裸文件摘要或未遮罩证据。字节身份只用本次运行临时 HMAC 生成的内容令牌表示，让成对扫描可比较字节，又不会发布可离线枚举的 SHA-256。发现 ID 必须唯一且可重复生成，但不能对敏感值本身做哈希后当作标识。
 
 `sanitize` 和 `verify` 包装结果还包含 `verification.integrity`。工件被删除/新增、媒体类型改变、内容令牌或大小变化无法解释，或变换状态为 skipped/partial/unsupported 时，验证都会是 `incomplete`；发现数量减少本身绝不等于变换有效。
+
+`prepare` 把本地控制数据与遮罩报告分开。决策、计划和批准文件含精确名称及稳定 SHA-256 源绑定，分类为 `local_only_do_not_share`。`prepare-result/v1` 包含有界动作明细、精确关系检查、最终复扫以及明确的省略记录数。结果超出预算时仍会返回完整有效 JSON，但结论为 `incomplete`、退出码为 `2`。计划/批准校验和只做一致性绑定，不是签名，也不能抵御拥有同一账户写权限的攻击者。
 
 退出码适合自动化：
 
@@ -145,7 +168,7 @@ sharesafe self-test [--json]
 
 - 必须写入新的目标位置，并拒绝不安全的覆盖关系。
 - 原始输入保持不变。
-- 只可能从受支持的 OOXML、JPEG 和 PNG 副本中移除高置信元数据。v0.1 对 PDF 只做审计；PDF 可能被原样复制进输出目录，但 ShareSafe 会把它的元数据变换标为不支持，不会称其已经净化。
+- 只可能从受支持的 OOXML、JPEG 和 PNG 副本中移除高置信元数据。PDF 只做审计；PDF 可能被原样复制进输出目录，但 ShareSafe 会把它的元数据变换标为不支持，不会称其已经净化。
 - 不会悄悄改正文，也不会代替人做披露决策。
 - 输出会立即复扫，残余发现和覆盖缺口仍会显示。
 - 在平台允许时，输出的访问时间和修改时间会被设为固定值；ShareSafe 不保证归一化 Windows 创建时间（birth time）。在有相应语义的平台上，普通文件权限只保留“可执行/不可执行”类别；精确 mode、所有者、ACL、扩展属性、备用数据流及其他平台元数据不会被照搬或净化。新输出按操作系统规则从目标父目录获得或继承安全属性。
@@ -154,7 +177,7 @@ sharesafe self-test [--json]
 
 ## 作为 Codex Skill 使用
 
-仓库在 `skills/sharesafe` 中提供一个轻量配套 Skill。它会指导 Codex 先检查能力、默认执行只读扫描、保护遮罩后的证据、把所有变换写入独立路径，并避免把部分结果说成“安全”。确定性的检测和报告生成由 Skill 内置的 Python 实现完成。
+仓库在 `skills/sharesafe` 中提供一个轻量配套 Skill。它会指导 Codex 先检查能力、默认执行只读扫描、保护遮罩后的证据、批准前审阅显式计划、把所有变换写入独立路径，并避免把部分结果说成“安全”。确定性的检测、计划、应用、验证和报告生成由 Skill 内置的 Python 实现完成。
 
 这个 Skill 可以独立运行：`scripts/run_sharesafe.py` 会加载同一目录内自带的实现。只有在希望从 shell 全局调用 `sharesafe` 命令时，才需要另行安装 wheel。
 
@@ -182,13 +205,14 @@ Codex 通常会自动发现新 Skill；只有未出现时才需重启。随后�
 
 ## 隐私与安全属性
 
-- 正常扫描和净化按无网络访问的本地运行方式设计。
+- 扫描、净化和 prepare 流程按无网络访问的本地运行方式设计。
 - 适配器接收不可变字节和仅用于展示的虚拟路径，不执行嵌入内容。
 - 报告在序列化之前遮罩证据，并避免写入源文件绝对路径。
 - 在创建大量 ZIP 条目对象之前，先预检普通/ZIP64 中央目录；随后继续限制条目数、解压字节量、压缩比和嵌套深度。
 - 发现结果、PNG 块/解压文本和压缩包评论文本都有明确上限；截断或结构损坏会得到 `incomplete`。
 - CLI 失败响应只使用稳定且不含路径的消息，避免诊断信息成为二次泄露。
 - 解析器失败会变成明确缺口，而不会只消失在日志里。
+- `prepare` 在写入源字节前验证暂存目录仅属当前用户（POSIX `0700`；Windows 受保护且可继承的 current-user-only DACL）。目标发布不会替换已有路径，但父目录操作仍依赖身份检查点，而非目录句柄锚定。
 - 净化不承诺安全擦除原件、临时文件、备份或文件系统历史。
 
 使用真实敏感材料前请阅读 [SECURITY.md](SECURITY.md)；在高风险流程中依赖 ShareSafe 前请阅读 [THREAT_MODEL.md](THREAT_MODEL.md)。
@@ -208,7 +232,7 @@ python -m build
 
 ## 项目状态与非目标
 
-v0.1 的目标是可靠的“分享前审计层”，不是大而全的自动脱敏。近期工作应优先提升经过测试的覆盖范围、规则精度、报告稳定性，以及与成熟专业工具的协作能力，而不是把 `no_findings` 包装成认证。
+v0.3 的目标是可靠的“分享前审计 + 显式计划的分享包构建层”，不是大而全的自动脱敏。后续工作应优先提升经过测试的覆盖范围、规则精度、报告稳定性，以及与成熟专业工具的协作能力，绝不能把 `no_findings` 或精确字节关系验证包装成认证。
 
 ShareSafe 不提供法律意见、恶意软件扫描、取证级匿名保证、隐写检测、安全擦除或合规认证。它输出的是发布决策所需的证据，不是决策本身。
 

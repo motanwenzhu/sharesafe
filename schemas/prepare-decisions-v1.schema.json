@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:sharesafe:schema:prepare-decisions:v1",
+  "title": "ShareSafe local prepare decisions v1",
+  "description": "Sensitive local-only editable decisions. Do not upload or share.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "classification", "source_boundary", "actions"],
+  "properties": {
+    "schema": {"const": "sharesafe.prepare-decisions/v1"},
+    "classification": {"const": "local_only_do_not_share"},
+    "source_boundary": {"const": "<selected-source>"},
+    "actions": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 999999,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["source_path", "target_path", "action", "reason_code"],
+        "properties": {
+          "source_path": {"$ref": "urn:sharesafe:schema:prepare-plan:v1#/$defs/relativePath"},
+          "target_path": {
+            "oneOf": [
+              {"$ref": "urn:sharesafe:schema:prepare-plan:v1#/$defs/relativePath"},
+              {"type": "null"}
+            ]
+          },
+          "action": {
+            "enum": [
+              "copy_unchanged",
+              "strip_ooxml_metadata",
+              "strip_png_metadata",
+              "strip_jpeg_metadata",
+              "omit_from_boundary",
+              "rename_in_bundle",
+              "manual_or_external_required",
+              "block"
+            ]
+          },
+          "reason_code": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$"
+          }
+        }
+      }
+    }
+  }
+}

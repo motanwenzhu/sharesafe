@@ -11,17 +11,18 @@ ShareSafe is alpha software. Review the report, the coverage gaps, and the files
 
 [简体中文](README.zh-CN.md) · [Chinese user guide](docs/user-guide.zh-CN.md) · [Design & workflows (中文)](docs/design-and-workflows.zh-CN.md) · [Support matrix](SUPPORT_MATRIX.md) · [Threat model](THREAT_MODEL.md) · [Architecture](docs/architecture.md) · [Research](docs/research.md)
 
-## What v0.1 is for
+## What v0.3 is for
 
 - Audit text, code, configuration, OOXML (`.docx`, `.xlsx`, `.pptx`), ZIP, PDF, JPEG, and PNG inputs before sharing.
 - Detect likely PII, credentials, identity-bearing user-home/UNC paths, identifying metadata, and selected hidden-document structures.
 - Inventory selected roots and empty directories, scan container names/comments, and traverse nested ZIP content under defensive resource limits.
 - Keep raw evidence out of reports by masking sensitive values at the finding boundary.
 - Create sanitized **copies** for a narrow set of high-confidence metadata transformations.
+- Build a new reviewable share directory from explicit per-file copy, omit, rename, or supported metadata-strip decisions.
 - Rescan transformed output and expose residual findings or incomplete coverage.
 - Return stable JSON and meaningful exit codes for scripts, CI, and agent workflows.
 
-ShareSafe is not a full document redactor. In v0.1, `sanitize` does not rewrite body text, apply visual redaction, run OCR, remove Office comments/revisions/notes/hidden sheets, or guarantee that every identifying signal is gone. Use a specialist redaction tool and human review when the content itself must change.
+ShareSafe is not a full document redactor. `sanitize` and `prepare` do not rewrite body text, apply visual redaction, run OCR, remove Office comments/revisions/notes/hidden sheets, or guarantee that every identifying signal is gone. Use a specialist redaction tool and human review when the content itself must change.
 
 ## Safety model in one minute
 
@@ -80,7 +81,7 @@ First inspect capabilities on the current machine:
 ```bash
 sharesafe doctor --json
 sharesafe formats --json
-sharesafe rules --json
+sharesafe rules --detail --json
 ```
 
 Scan a file or folder without modifying it:
@@ -103,6 +104,18 @@ sharesafe verify ./bundle ./bundle.sanitized --json --report ./sharesafe-verify-
 
 `sanitize` already returns its trusted before/after verification. Standalone `verify` is a conservative comparison for a separately prepared copy: because it has no authenticated transform manifest, any byte change remains `unverified` even when findings decrease.
 
+Build a new directory from an explicit complete decision file:
+
+```bash
+sharesafe prepare plan ./source --decisions ./decisions.json --out-plan ./plan.json --json
+sharesafe prepare inspect ./plan.json --json
+sharesafe prepare approve ./plan.json --out-approval ./approval.json --approve-all --json
+sharesafe prepare apply ./plan.json --approval ./approval.json --source ./source --out ./new-bundle --json
+sharesafe prepare verify ./plan.json --source ./source --output ./new-bundle --json
+```
+
+The decisions, plan, and approval are sensitive local-only controls; do not publish them. Inspect the masked plan view before approval. The output must be a new absent directory, and `verify` still needs the original source to recompute exact expected bytes and format invariants.
+
 Run the built-in synthetic smoke test:
 
 ```bash
@@ -117,8 +130,16 @@ Use `sharesafe COMMAND --help` for the current options, including the scan thres
 sharesafe scan PATH [PATH ...] [--json] [--report FILE] [--fail-on LEVEL]
 sharesafe sanitize PATH --out NEW_PATH [--json] [--report FILE]
 sharesafe verify ORIGINAL PREPARED [--json] [--report FILE]
-sharesafe doctor [--json]
-sharesafe rules [--json]
+sharesafe check PATH [PATH ...] [--policy FILE] [--json] [--report FILE]
+sharesafe policy init --out NEW_FILE
+sharesafe report {show,diff,share-summary} ... --json
+sharesafe prepare plan SOURCE --decisions LOCAL_JSON --out-plan NEW_PLAN [--json]
+sharesafe prepare inspect LOCAL_PLAN [--json]
+sharesafe prepare approve LOCAL_PLAN --out-approval NEW_APPROVAL --approve-all [--json]
+sharesafe prepare apply LOCAL_PLAN --approval LOCAL_APPROVAL --source SOURCE --out NEW_DIRECTORY [--json] [--report FILE]
+sharesafe prepare verify LOCAL_PLAN --source SOURCE --output DIRECTORY [--json] [--report FILE]
+sharesafe doctor [--deep] [--json]
+sharesafe rules [--detail] [--json]
 sharesafe formats [--json]
 sharesafe self-test [--json]
 ```
@@ -126,6 +147,8 @@ sharesafe self-test [--json]
 Scan-like JSON uses schema identifier `sharesafe.report/v1` and includes `tool`, `run`, `summary`, `artifacts`, `findings`, `gaps`, `errors`, and `dependencies`. Display paths are relative; reports must not contain the absolute scan root, raw file digests, or unmasked evidence. Artifact byte identity is represented by a temporary, run-scoped HMAC content token so paired scans can compare bytes without publishing an offline-guessable SHA-256. Finding identifiers are unique and deterministic without hashing the sensitive value itself.
 
 `sanitize` and `verify` wrappers also include `verification.integrity`. Artifact deletion, addition, type changes, unexplained content-token/size changes, and skipped/partial/unsupported transforms make verification `incomplete`; a falling finding count alone is never treated as proof of a valid transformation.
+
+`prepare` separates local controls from masked results. Decisions, plans, and approvals contain exact names and stable SHA-256 source bindings and are classified `local_only_do_not_share`. `prepare-result/v1` contains bounded action detail, exact relation checks, a final scan, and explicit omitted-record counts. A result-size fallback remains valid JSON but is `incomplete` with exit code `2`. Plan/approval checksums are consistency bindings, not signatures or same-account attacker protection.
 
 Exit codes are designed for automation:
 
@@ -145,7 +168,7 @@ Do not write automation that interprets only code `0` as authorization to publis
 
 - It writes to a new destination and refuses unsafe overwrite relationships.
 - It preserves the original input.
-- It may remove only high-confidence metadata from supported OOXML, JPEG, and PNG copies. PDF is audit-only in v0.1; a PDF may be copied into an output tree, but ShareSafe reports its metadata transformation as unsupported and does not call it sanitized.
+- It may remove only high-confidence metadata from supported OOXML, JPEG, and PNG copies. PDF is audit-only; a PDF may be copied into an output tree, but ShareSafe reports its metadata transformation as unsupported and does not call it sanitized.
 - It does not silently modify body text or make editorial disclosure decisions.
 - It rescans output immediately. Residual findings and coverage gaps remain visible.
 - Where the platform permits, it sets output access and modification times to a fixed value. It does not promise to normalize Windows creation/birth time. It preserves only the executable/non-executable class of regular-file permissions where meaningful; exact modes, ownership, ACLs, extended attributes, alternate data streams, and other platform metadata are not cloned or sanitized. New output receives or inherits security properties from the destination parent according to the operating system.
@@ -154,7 +177,7 @@ Successful file creation is not successful verification. For exact format behavi
 
 ## Use as a Codex Skill
 
-The repository includes a thin companion Skill in `skills/sharesafe`. The Skill teaches Codex to check capabilities first, default to read-only scanning, preserve masked evidence, request a separate output for transformations, and avoid calling a partial result “safe.” Deterministic detection and report generation remain in the bundled Python implementation.
+The repository includes a thin companion Skill in `skills/sharesafe`. The Skill teaches Codex to check capabilities first, default to read-only scanning, preserve masked evidence, review an explicit plan before approval, require separate outputs for transformations, and avoid calling a partial result “safe.” Deterministic detection, planning, application, verification, and report generation remain in the bundled Python implementation.
 
 The Skill is self-contained: `scripts/run_sharesafe.py` loads the implementation shipped inside its own folder. Installing the wheel is optional and is needed only when you want the global `sharesafe` shell command.
 
@@ -182,13 +205,14 @@ Codex normally detects the new Skill automatically; restart only if it does not 
 
 ## Privacy and security properties
 
-- Normal scanning and sanitization are designed to run locally without network access.
+- Scanning, sanitization, and prepare workflows are designed to run locally without network access.
 - Adapters receive bytes and a display-only virtual path; they must not execute embedded content.
 - Reports mask evidence before serialization and avoid absolute source paths.
 - Archive traversal preflights classic/ZIP64 central directories before entry objects are materialized, then enforces entry, decompressed-byte, compression-ratio, and nesting limits.
 - Search results, PNG chunks/decompressed text, and archive-comment text have explicit caps; a truncation or malformed structure produces `incomplete`.
 - CLI failure envelopes use stable path-free messages so diagnostics do not become a second disclosure.
 - Parser failures become gaps instead of disappearing into logs.
+- Prepare staging is verified owner-only (`0700` on POSIX; protected current-user-only inheritable DACL on Windows) before source bytes are written. Destination publication never replaces an existing path, but parent operations remain checkpoint-based rather than directory-handle anchored.
 - Sanitization never promises secure deletion of originals, temporary files, backups, or filesystem history.
 
 Read [SECURITY.md](SECURITY.md) before testing with sensitive material and [THREAT_MODEL.md](THREAT_MODEL.md) before relying on ShareSafe in a high-risk workflow.
@@ -208,7 +232,7 @@ Behavioral changes must preserve the contract in `docs/design-contract.md` or ex
 
 ## Project status and non-goals
 
-The v0.1 goal is a dependable pre-share audit layer, not broad automatic redaction. Near-term work should improve tested coverage, rule precision, report stability, and interoperability with mature specialist tools. It should not inflate `no_findings` into a certification claim.
+The v0.3 goal is a dependable pre-share audit and explicitly planned bundle-construction layer, not broad automatic redaction. Future work should improve tested coverage, rule precision, report stability, and interoperability with mature specialist tools. It must not inflate `no_findings` or a verified byte relation into a certification claim.
 
 ShareSafe does not provide legal advice, malware scanning, forensic anonymity, steganography detection, secure erasure, or a compliance certification. Its output is evidence for a release decision—not the decision itself.
 

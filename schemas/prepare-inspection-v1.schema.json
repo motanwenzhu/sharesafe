@@ -1,0 +1,100 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:sharesafe:schema:prepare-inspection:v1",
+  "title": "ShareSafe masked prepare inspection v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "classification",
+    "executable",
+    "item_count",
+    "action_counts",
+    "actions"
+  ],
+  "properties": {
+    "schema": {"const": "sharesafe.prepare-inspection/v1"},
+    "classification": {"const": "local_masked"},
+    "executable": {"type": "boolean"},
+    "item_count": {"type": "integer", "minimum": 0, "maximum": 999999},
+    "action_counts": {
+      "type": "object",
+      "additionalProperties": {"type": "integer", "minimum": 1, "maximum": 999999},
+      "propertyNames": {
+        "enum": [
+          "copy_unchanged",
+          "strip_ooxml_metadata",
+          "strip_png_metadata",
+          "strip_jpeg_metadata",
+          "omit_from_boundary",
+          "rename_in_bundle",
+          "manual_or_external_required",
+          "block"
+        ]
+      }
+    },
+    "actions": {
+      "type": "array",
+      "maxItems": 999999,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "action_id",
+          "source_path",
+          "target_path",
+          "action",
+          "reason_code",
+          "media_type",
+          "expected_relation",
+          "known_losses"
+        ],
+        "properties": {
+          "action_id": {"type": "string", "pattern": "^prepare-action-[0-9]{6}$"},
+          "source_path": {"type": "string", "minLength": 1, "maxLength": 16384},
+          "target_path": {
+            "oneOf": [
+              {"type": "string", "minLength": 1, "maxLength": 16384},
+              {"type": "null"}
+            ]
+          },
+          "action": {
+            "enum": [
+              "copy_unchanged",
+              "strip_ooxml_metadata",
+              "strip_png_metadata",
+              "strip_jpeg_metadata",
+              "omit_from_boundary",
+              "rename_in_bundle",
+              "manual_or_external_required",
+              "block"
+            ]
+          },
+          "reason_code": {"type": "string", "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$"},
+          "media_type": {"type": "string", "minLength": 1, "maxLength": 255},
+          "expected_relation": {
+            "enum": [
+              "byte_identical",
+              "metadata_reduced_format_preserved",
+              "absent_from_output",
+              "not_applicable"
+            ]
+          },
+          "known_losses": {
+            "type": "array",
+            "maxItems": 1,
+            "uniqueItems": true,
+            "items": {
+              "enum": [
+                "document_metadata_removed",
+                "image_metadata_removed",
+                "file_omitted",
+                "bundle_path_changed"
+              ]
+            }
+          }
+        }
+      }
+    }
+  }
+}

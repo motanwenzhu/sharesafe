@@ -8,8 +8,8 @@ Until the first tagged release, security fixes are made on the default branch. A
 
 | Version | Security fixes |
 |---|---|
-| Latest `0.1.x` | Yes, on a best-effort alpha basis |
-| Older `0.1.x` | Upgrade to the latest patch first |
+| Latest `0.3.x` | Yes, on a best-effort alpha basis |
+| `0.1.x`–`0.2.x` | Upgrade to the latest `0.3.x` patch first |
 | Unreleased development snapshots | Default branch only |
 
 This policy may change before `1.0.0`. Security fixes can include behavior changes when preserving old behavior would expose data.
@@ -42,6 +42,9 @@ We aim to acknowledge a report within seven days and provide an initial assessme
 - A parser, encrypted input, unsupported format, malformed file, or resource limit being reported as complete coverage.
 - Archive traversal, symlink traversal, path confusion, unsafe output placement, or overwrite of an input.
 - Sanitization that changes the original, reports success without rescanning, or silently drops content beyond its documented transform.
+- Prepare plans that omit source entries, accept ambiguous/colliding paths, approve only part of an action set, fail to detect source drift, or let an omitted/renamed path reappear through another target.
+- Prepare staging or local control artifacts that cannot prove owner-only permissions, destination publication that overwrites a concurrent entry, or final scanning that is not bound to the exact verified output bytes.
+- A result-size limit that emits invalid/truncated JSON, hides omitted records without an explicit incomplete state, or turns a committed output into an ambiguous reporting failure.
 - ZIP bombs, parser denial of service, unbounded recursion, or excessive allocation.
 - Execution of macros, scripts, formulas, links, embedded files, or other active content while scanning.
 - Unexpected network access or transfer of inspected content.

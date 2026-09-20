@@ -1,0 +1,105 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:sharesafe:schema:policy:v1",
+  "title": "ShareSafe effective policy v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "fail_on",
+    "limits",
+    "required_capabilities",
+    "blocking_categories",
+    "optional_tools",
+    "manifest"
+  ],
+  "properties": {
+    "schema": {"const": "sharesafe.policy/v1"},
+    "fail_on": {"enum": ["info", "low", "medium", "high", "critical", "never"]},
+    "limits": {"$ref": "#/$defs/limits"},
+    "required_capabilities": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {"enum": ["embedded_objects", "hidden_content", "metadata", "ocr", "text"]}
+    },
+    "blocking_categories": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 64,
+        "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$"
+      }
+    },
+    "optional_tools": {"type": "boolean"},
+    "manifest": {"$ref": "#/$defs/manifest"}
+  },
+  "$defs": {
+    "limits": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "max_archive_depth",
+        "max_archive_entries",
+        "max_archive_member_bytes",
+        "max_compression_ratio",
+        "max_directory_depth",
+        "max_display_path_chars",
+        "max_errors_total",
+        "max_expanded_bytes",
+        "max_file_bytes",
+        "max_files",
+        "max_findings_per_artifact",
+        "max_findings_total",
+        "max_gaps_total",
+        "max_name_bytes",
+        "max_pdf_pages",
+        "max_report_bytes",
+        "max_report_field_chars",
+        "max_text_bytes",
+        "max_total_file_bytes",
+        "max_xml_bytes"
+      ],
+      "properties": {
+        "max_archive_depth": {"type": "integer", "minimum": 0, "maximum": 20},
+        "max_archive_entries": {"type": "integer", "minimum": 1, "maximum": 1000000},
+        "max_archive_member_bytes": {"type": "integer", "minimum": 1, "maximum": 4294967296},
+        "max_compression_ratio": {"type": "integer", "minimum": 1, "maximum": 1000000},
+        "max_directory_depth": {"type": "integer", "minimum": 0, "maximum": 256},
+        "max_display_path_chars": {"type": "integer", "minimum": 256, "maximum": 1048576},
+        "max_errors_total": {"type": "integer", "minimum": 1, "maximum": 10000},
+        "max_expanded_bytes": {"type": "integer", "minimum": 1, "maximum": 68719476736},
+        "max_file_bytes": {"type": "integer", "minimum": 1, "maximum": 4294967296},
+        "max_files": {"type": "integer", "minimum": 1, "maximum": 1000000},
+        "max_findings_per_artifact": {"type": "integer", "minimum": 1, "maximum": 100000},
+        "max_findings_total": {"type": "integer", "minimum": 1, "maximum": 1000000},
+        "max_gaps_total": {"type": "integer", "minimum": 4, "maximum": 100000},
+        "max_name_bytes": {"type": "integer", "minimum": 64, "maximum": 1048576},
+        "max_pdf_pages": {"type": "integer", "minimum": 1, "maximum": 100000},
+        "max_report_bytes": {"type": "integer", "minimum": 8192, "maximum": 1073741824},
+        "max_report_field_chars": {"type": "integer", "minimum": 256, "maximum": 1048576},
+        "max_text_bytes": {"type": "integer", "minimum": 1, "maximum": 1073741824},
+        "max_total_file_bytes": {"type": "integer", "minimum": 1, "maximum": 68719476736},
+        "max_xml_bytes": {"type": "integer", "minimum": 1, "maximum": 1073741824}
+      }
+    },
+    "manifest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enabled", "path", "require_exact"],
+      "properties": {
+        "enabled": {"type": "boolean"},
+        "path": {"type": ["string", "null"], "minLength": 1, "maxLength": 4096},
+        "require_exact": {"type": "boolean"}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"enabled": {"const": true}}, "required": ["enabled"]},
+          "then": {"properties": {"path": {"type": "string"}}},
+          "else": {"properties": {"path": {"type": "null"}}}
+        }
+      ]
+    }
+  }
+}

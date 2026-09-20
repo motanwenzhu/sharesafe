@@ -6,20 +6,21 @@ from __future__ import annotations
 import argparse
 import base64
 import csv
-from email.parser import BytesParser
-from email.policy import default
 import hashlib
 import io
-from pathlib import Path, PurePosixPath
 import tarfile
 import tomllib
 import zipfile
-
+from email.parser import BytesParser
+from email.policy import default
+from pathlib import Path, PurePosixPath
 
 REQUIRED_WHEEL_FILES = {
     "sharesafe/__init__.py",
     "sharesafe/__main__.py",
+    "sharesafe/capabilities.py",
     "sharesafe/catalog.py",
+    "sharesafe/check.py",
     "sharesafe/cli.py",
     "sharesafe/detectors.py",
     "sharesafe/engine.py",
@@ -27,8 +28,17 @@ REQUIRED_WHEEL_FILES = {
     "sharesafe/models.py",
     "sharesafe/ooxml_xml.py",
     "sharesafe/path_safety.py",
+    "sharesafe/policy.py",
+    "sharesafe/prepare.py",
+    "sharesafe/prepare_decisions.py",
+    "sharesafe/prepare_io.py",
+    "sharesafe/prepare_plan.py",
+    "sharesafe/receipts.py",
     "sharesafe/redaction.py",
+    "sharesafe/report_hygiene.py",
+    "sharesafe/report_tools.py",
     "sharesafe/reporting.py",
+    "sharesafe/safe_io.py",
     "sharesafe/sanitize.py",
     "sharesafe/sniff.py",
     "sharesafe/verify.py",
@@ -56,10 +66,20 @@ REQUIRED_SDIST_FILES = {
     "THIRD_PARTY_NOTICES.md",
     "THREAT_MODEL.md",
     "docs/architecture.md",
+    "docs/design-and-workflows.zh-CN.md",
     "docs/design-contract.md",
     "docs/research.md",
     "docs/skill-evaluation.md",
+    "docs/user-guide.zh-CN.md",
     "pyproject.toml",
+    "schemas/check-v1.schema.json",
+    "schemas/policy-v1.schema.json",
+    "schemas/prepare-approval-v1.schema.json",
+    "schemas/prepare-control-write-v1.schema.json",
+    "schemas/prepare-decisions-v1.schema.json",
+    "schemas/prepare-inspection-v1.schema.json",
+    "schemas/prepare-plan-v1.schema.json",
+    "schemas/prepare-result-v1.schema.json",
     "schemas/report-v1.schema.json",
     "schemas/sanitize-v1.schema.json",
     "schemas/verify-v1.schema.json",
@@ -70,7 +90,14 @@ REQUIRED_SDIST_FILES = {
     "skills/sharesafe/references/workflow.md",
     "skills/sharesafe/scripts/run_sharesafe.py",
     "tests/conftest.py",
+    "tests/test_capabilities.py",
     "tests/test_cli.py",
+    "tests/test_policy_cli.py",
+    "tests/test_prepare_apply.py",
+    "tests/test_prepare_cli.py",
+    "tests/test_prepare_plan.py",
+    "tests/test_report_hygiene_bounds.py",
+    "tests/test_report_tools.py",
 }
 REQUIRED_SDIST_FILES |= {
     f"skills/sharesafe/scripts/{name}" for name in REQUIRED_WHEEL_FILES
@@ -210,8 +237,8 @@ def main() -> int:
     if args.tag is not None and args.tag != f"v{version}":
         fail(f"tag {args.tag!r} does not match project version v{version}")
 
-    wheel = exactly_one(args.dist, "*.whl")
-    sdist = exactly_one(args.dist, "*.tar.gz")
+    wheel = exactly_one(args.dist, f"sharesafe-{version}-*.whl")
+    sdist = exactly_one(args.dist, f"sharesafe-{version}.tar.gz")
     check_wheel(wheel, version)
     check_sdist(sdist, version)
     print(f"release artifacts valid for ShareSafe {version}: {wheel.name}, {sdist.name}")

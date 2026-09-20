@@ -1,0 +1,217 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:sharesafe:schema:prepare-plan:v1",
+  "title": "ShareSafe local prepare plan v1",
+  "description": "Sensitive local-only control artifact. Do not upload or share.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "classification",
+    "source_boundary",
+    "destination_boundary",
+    "item_count",
+    "actions",
+    "plan_digest"
+  ],
+  "properties": {
+    "schema": {"const": "sharesafe.prepare-plan/v1"},
+    "classification": {"const": "local_only_do_not_share"},
+    "source_boundary": {"const": "<selected-source>"},
+    "destination_boundary": {"const": "<new-bundle>"},
+    "item_count": {"type": "integer", "minimum": 1, "maximum": 999999},
+    "actions": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 999999,
+      "items": {"$ref": "#/$defs/action"}
+    },
+    "plan_digest": {"$ref": "#/$defs/sha256"}
+  },
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "relativePath": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4096,
+      "pattern": "^(?![/\\\\])(?![A-Za-z]:)(?!.*\\\\)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*//).+$"
+    },
+    "sourceBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["algorithm", "digest", "size"],
+      "properties": {
+        "algorithm": {"const": "sha256"},
+        "digest": {"$ref": "#/$defs/sha256"},
+        "size": {"type": "integer", "minimum": 0}
+      }
+    },
+    "action": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "action_id",
+        "source_path",
+        "target_path",
+        "action",
+        "reason_code",
+        "media_type",
+        "source_binding",
+        "approval_required",
+        "expected_relation",
+        "known_losses"
+      ],
+      "properties": {
+        "action_id": {
+          "type": "string",
+          "pattern": "^prepare-action-[0-9]{6}$"
+        },
+        "source_path": {"$ref": "#/$defs/relativePath"},
+        "target_path": {
+          "oneOf": [
+            {"$ref": "#/$defs/relativePath"},
+            {"type": "null"}
+          ]
+        },
+        "action": {
+          "enum": [
+            "copy_unchanged",
+            "strip_ooxml_metadata",
+            "strip_png_metadata",
+            "strip_jpeg_metadata",
+            "omit_from_boundary",
+            "rename_in_bundle",
+            "manual_or_external_required",
+            "block"
+          ]
+        },
+        "reason_code": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$"
+        },
+        "media_type": {"type": "string", "minLength": 1, "maxLength": 255},
+        "source_binding": {"$ref": "#/$defs/sourceBinding"},
+        "approval_required": {"type": "boolean"},
+        "expected_relation": {
+          "enum": [
+            "byte_identical",
+            "metadata_reduced_format_preserved",
+            "absent_from_output",
+            "not_applicable"
+          ]
+        },
+        "known_losses": {
+          "type": "array",
+          "maxItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "document_metadata_removed",
+              "image_metadata_removed",
+              "file_omitted",
+              "bundle_path_changed"
+            ]
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"action": {"const": "copy_unchanged"}}, "required": ["action"]},
+          "then": {
+            "properties": {
+              "target_path": {"$ref": "#/$defs/relativePath"},
+              "approval_required": {"const": true},
+              "expected_relation": {"const": "byte_identical"},
+              "known_losses": {"const": []}
+            }
+          }
+        },
+        {
+          "if": {"properties": {"action": {"const": "strip_ooxml_metadata"}}, "required": ["action"]},
+          "then": {
+            "properties": {
+              "target_path": {"$ref": "#/$defs/relativePath"},
+              "media_type": {
+                "enum": [
+                  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                  "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+                ]
+              },
+              "approval_required": {"const": true},
+              "expected_relation": {"const": "metadata_reduced_format_preserved"},
+              "known_losses": {"const": ["document_metadata_removed"]}
+            }
+          }
+        },
+        {
+          "if": {"properties": {"action": {"const": "strip_png_metadata"}}, "required": ["action"]},
+          "then": {
+            "properties": {
+              "target_path": {"$ref": "#/$defs/relativePath"},
+              "media_type": {"const": "image/png"},
+              "approval_required": {"const": true},
+              "expected_relation": {"const": "metadata_reduced_format_preserved"},
+              "known_losses": {"const": ["image_metadata_removed"]}
+            }
+          }
+        },
+        {
+          "if": {"properties": {"action": {"const": "strip_jpeg_metadata"}}, "required": ["action"]},
+          "then": {
+            "properties": {
+              "target_path": {"$ref": "#/$defs/relativePath"},
+              "media_type": {"const": "image/jpeg"},
+              "approval_required": {"const": true},
+              "expected_relation": {"const": "metadata_reduced_format_preserved"},
+              "known_losses": {"const": ["image_metadata_removed"]}
+            }
+          }
+        },
+        {
+          "if": {"properties": {"action": {"const": "omit_from_boundary"}}, "required": ["action"]},
+          "then": {
+            "properties": {
+              "target_path": {"type": "null"},
+              "approval_required": {"const": true},
+              "expected_relation": {"const": "absent_from_output"},
+              "known_losses": {"const": ["file_omitted"]}
+            }
+          }
+        },
+        {
+          "if": {"properties": {"action": {"const": "rename_in_bundle"}}, "required": ["action"]},
+          "then": {
+            "properties": {
+              "target_path": {"$ref": "#/$defs/relativePath"},
+              "approval_required": {"const": true},
+              "expected_relation": {"const": "byte_identical"},
+              "known_losses": {"const": ["bundle_path_changed"]}
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "action": {"enum": ["manual_or_external_required", "block"]}
+            },
+            "required": ["action"]
+          },
+          "then": {
+            "properties": {
+              "target_path": {"type": "null"},
+              "approval_required": {"const": false},
+              "expected_relation": {"const": "not_applicable"},
+              "known_losses": {"const": []}
+            }
+          }
+        }
+      ]
+    }
+  }
+}

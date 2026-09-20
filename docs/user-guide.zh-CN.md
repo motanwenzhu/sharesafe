@@ -1,9 +1,12 @@
-# ShareSafe v0.1 中文使用手册
+# ShareSafe v0.3 中文使用手册
 
-本文面向需要在文件、目录、压缩包或发布制品离开本机前进行隐私审计的个人、团队、自动化维护者和 Codex 用户。手册对应 ShareSafe `0.1.x` 的公开行为；具体格式能力以 [支持矩阵](../SUPPORT_MATRIX.md) 为准，安全边界以 [威胁模型](../THREAT_MODEL.md) 为准。
+本文面向需要在文件、目录、压缩包或分享制品离开本机前进行隐私审计的个人、团队、自动化维护者和 Codex 用户。手册以当前本地 v0.3 实现为准，包括 `check`/policy、`doctor --deep`、`rules --detail`、变换 receipt、报告卫生，以及 `prepare plan/inspect/approve/apply/verify` 完整流程。具体格式能力以 [支持矩阵](../SUPPORT_MATRIX.md) 为准，安全边界以 [威胁模型](../THREAT_MODEL.md) 为准。
 
 > [!IMPORTANT]
 > ShareSafe 能提供的最强肯定结论是“在已完成的检查范围内，没有发现达到相应规则或阈值的项目”。`no_findings` 不代表文件已经匿名、合规、无恶意内容或获准发布。
+
+> [!NOTE]
+> 当前包版本为 `0.3.0`，但版本号不能代替功能验收。在脚本或 CI 采用前，请在目标环境运行 `--help`、`doctor --deep --json`、`self-test --json` 和一个仅含合成数据的 smoke test。公开发布状态和制品摘要以 GitHub Releases 为准。
 
 ## 目录
 
@@ -22,6 +25,10 @@
 13. [资源限制与大型输入](#13-资源限制与大型输入)
 14. [常见问题与故障排查](#14-常见问题与故障排查)
 15. [更新、卸载与分享前检查表](#15-更新卸载与分享前检查表)
+16. [v0.2 可复现决策：policy 与 check](#16-v02-可复现决策policy-与-check)
+17. [v0.2 深度能力、精确规则、receipt 与报告卫生](#17-v02-深度能力精确规则receipt-与报告卫生)
+18. [v0.3 可验证分享包流程](#18-v03-可验证分享包流程)
+19. [数据分级、保管与流转](#19-数据分级保管与流转)
 
 ## 1. 先选择使用方式
 
@@ -48,6 +55,7 @@ ShareSafe 提供两个入口，底层使用同一套确定性 Python 实现。
 - 检查 JPEG、PNG 的部分元数据；安装 Pillow 后增加受支持图片格式的元数据能力。
 - 把未支持、加密、损坏、解析失败或达到资源限制的内容明确记录为覆盖缺口。
 - 对受支持的 OOXML、JPEG 和 PNG 创建新的元数据减少副本，并立即复扫。
+- 通过覆盖全部源文件的显式动作计划、独立审阅与批准，构建新的可验证分享目录。
 
 ### 2.2 ShareSafe 不做什么
 
@@ -56,7 +64,7 @@ ShareSafe 提供两个入口，底层使用同一套确定性 Python 实现。
 - 不提供完整正文涂黑、像素级遮盖或法律意义上的不可逆脱敏。
 - 不执行宏、脚本、公式、链接或嵌入程序。
 - 不上传输入、报告或净化副本，也不替用户作出发布决定。
-- v0.1 不改写 PDF；安装 `pypdf` 只增强扫描，不增加 PDF 净化能力。
+- 不改写 PDF；安装 `pypdf` 只增强扫描，不增加 PDF 净化能力。
 
 ### 2.3 使用前应准备什么
 
@@ -69,25 +77,21 @@ ShareSafe 提供两个入口，底层使用同一套确定性 Python 实现。
 
 ## 3. 安装与首次验收
 
-### 3.1 从 GitHub Release 安装 CLI
+### 3.1 从本地受信制品安装 CLI
 
-从 [GitHub Releases](https://github.com/motanwenzhu/sharesafe/releases) 下载同一版本的以下文件：
+如果团队已在本地构建或通过受控渠道交付了同一版本的 wheel、sdist 和 `SHA256SUMS`，先核对摘要，再在独立虚拟环境中安装。本手册不假定这些制品已在任何公开仓库发布。
 
-- `sharesafe-VERSION-py3-none-any.whl`
-- `sharesafe-VERSION.tar.gz`
-- `SHA256SUMS`
-
-先核对下载件。Linux 或 macOS 可在三个文件所在目录运行：
+Linux 或 macOS 可在制品所在目录运行：
 
 ```bash
 sha256sum -c SHA256SUMS
 ```
 
-Windows PowerShell 可计算两个发布包的哈希，再与 `SHA256SUMS` 对照：
+Windows PowerShell 可计算两个本地制品的哈希，再与 `SHA256SUMS` 对照：
 
 ```powershell
-Get-FileHash .\sharesafe-0.1.0-py3-none-any.whl -Algorithm SHA256
-Get-FileHash .\sharesafe-0.1.0.tar.gz -Algorithm SHA256
+Get-FileHash .\sharesafe-VERSION-py3-none-any.whl -Algorithm SHA256
+Get-FileHash .\sharesafe-VERSION.tar.gz -Algorithm SHA256
 Get-Content .\SHA256SUMS
 ```
 
@@ -96,13 +100,13 @@ Get-Content .\SHA256SUMS
 ```bash
 # macOS / Linux
 python3 -m venv .venv-sharesafe
-./.venv-sharesafe/bin/python -m pip install --no-deps ./sharesafe-0.1.0-py3-none-any.whl
+./.venv-sharesafe/bin/python -m pip install --no-deps ./sharesafe-VERSION-py3-none-any.whl
 ```
 
 ```powershell
 # Windows PowerShell
 py -3 -m venv .venv-sharesafe
-.\.venv-sharesafe\Scripts\python.exe -m pip install --no-deps .\sharesafe-0.1.0-py3-none-any.whl
+.\.venv-sharesafe\Scripts\python.exe -m pip install --no-deps .\sharesafe-VERSION-py3-none-any.whl
 ```
 
 如需 PDF 文本和更丰富的图片元数据能力，可以在经过许可、允许访问包索引的环境中，用同一个虚拟环境的 Python 增加可选依赖：
@@ -213,6 +217,8 @@ flowchart TD
 2. **覆盖是否完整。** `incomplete` 比发现数量更优先。
 3. **结果是否经过人工策略。** ShareSafe 输出证据，不输出发布许可。
 
+重复或 CI 流程可把图中的一次性 `scan` 替换为 `check`，从而同时保存 effective policy、ruleset version 和实际退出决策。对“从混杂工作区构建新分享边界”的任务，应进入 `prepare plan -> inspect -> approve -> apply -> verify`，而不是用默认 ignore 让原目录看起来已检查完整。
+
 ## 5. 命令总览
 
 | 命令 | 是否写入输入 | 主要用途 | JSON schema |
@@ -222,16 +228,24 @@ flowchart TD
 | `rules` | 否 | 查看稳定规则族 | `sharesafe.rules/v1` |
 | `self-test` | 否 | 用合成数据检查安装和遮罩不变量 | `sharesafe.self-test/v1` |
 | `scan` | 否 | 扫描一个或多个文件/目录 | `sharesafe.report/v1` |
+| `policy init/validate/show` | `init` 只创建新文件 | 创建、严格验证或显示本地策略 | `sharesafe.policy-*/v1` / `sharesafe.policy/v1` |
+| `check` | 否 | 扫描并将完整有效策略、规则集与退出决策固定到 wrapper | `sharesafe.check/v1` |
 | `sanitize` | 创建新副本 | 进行允许列表内的元数据变换并复扫 | `sharesafe.sanitize/v1` |
 | `verify` | 否 | 重新扫描并保守比较原件与另行准备的副本 | `sharesafe.verify/v1` |
+| `report show/diff/share-summary` | 否 | 本地展示、跨运行结构差异或生成最小化分享摘要 | 对应 `sharesafe.report-*/v1` 派生视图 |
+| `prepare plan/inspect/approve/apply/verify` | `plan`/`approve`/`apply` 会创建新本地工件 | 构建精确分享边界 | `sharesafe.prepare-*/v1` |
 
 查看当前版本的准确参数：
 
 ```bash
 sharesafe --help
+sharesafe check --help
+sharesafe policy --help
 sharesafe scan --help
 sharesafe sanitize --help
 sharesafe verify --help
+sharesafe report --help
+sharesafe prepare --help
 ```
 
 ## 6. 只读扫描：`scan`
@@ -384,7 +398,7 @@ sharesafe scan ./release --no-optional-tools --json
 - `embedded_objects`
 - `ocr`
 
-`not_applicable` 必须表示该能力确实不适用，不能用来代替“不支持”。`complete` 只表示 v0.1 声明的、当前已安装能力范围内完成，不表示所有潜在隐私风险均被覆盖。
+`not_applicable` 必须表示该能力确实不适用，不能用来代替“不支持”。`complete` 只表示当前声明的、已安装能力范围内完成，不表示所有潜在隐私风险均被覆盖。
 
 ### 7.4 退出码
 
@@ -408,7 +422,7 @@ sharesafe scan ./release --no-optional-tools --json
 
 ### 8.1 什么时候使用
 
-仅当你明确需要一个新的分享副本，并且问题属于 v0.1 的元数据允许列表时使用。正文、像素、Office 批注/修订/备注、宏、嵌入对象或 PDF 信息需要格式专用工具和人工检查。
+仅当你明确需要一个新的分享副本，并且问题属于当前元数据允许列表时使用。正文、像素、Office 批注/修订/备注、宏、嵌入对象或 PDF 信息需要格式专用工具和人工检查。
 
 ### 8.2 命令
 
@@ -428,7 +442,7 @@ sharesafe sanitize ./original --out ./release-copy --json \
 
 ShareSafe 会拒绝覆盖已有目标、输入等于输出、输出嵌套在输入中、符号链接/reparse point、Windows alternate data stream 路径和其他危险关系。
 
-### 8.3 v0.1 实际会改变什么
+### 8.3 当前版本实际会改变什么
 
 | 格式 | 允许的变换 | 重要保留项 |
 |---|---|---|
@@ -463,10 +477,30 @@ ShareSafe 会拒绝覆盖已有目标、输入等于输出、输出嵌套在输�
 | `not_needed` | 没有需要移除的允许列表元数据 |
 | `partial` | 只应用了部分变换，验证保持不完整 |
 | `skipped` | 因格式结构、签名、宏、嵌入对象、方向或限制而跳过 |
-| `unsupported` | v0.1 没有该变换 |
+| `unsupported` | 当前版本没有该变换 |
 | `failed` | 变换失败，不能当作成功副本 |
 
 不要仅凭“目标目录已生成”判断完成。必须同时检查 `after.summary`、所有 `actions` 和 `verification`。
+
+#### v0.2 变换 receipt 与精确字节绑定
+
+v0.2 不再因为“路径相同 + action 名称看起来受支持”就相信一次变化。`sanitize` 进程内部会由核心签发不可从外部 JSON 重建的 `TransformReceipt`，并绑定四个快照：
+
+1. before scan 实际读到的 token；
+2. 变换器实际读到的 transform-input token；
+3. 变换器实际写出的 expected-after token；
+4. after scan 实际读到的 postscan token。
+
+只有 `before == transform-input`、`expected-after == postscan`、媒体类型与动作精确匹配、路径唯一，且所有格式级 `preserved_facets` 都保持，变化才能进入 `transformed` 完整性状态。受保护的 facet 至少包括：
+
+| 格式 | 变换中必须保持的主要表示 |
+|---|---|
+| OOXML | 允许列表以外的 ZIP 成员内容、成员集与关系目标 |
+| PNG | 关键块、全部 IDAT、尺寸/色彩关键字段和必须保留的 Orientation |
+| JPEG | SOS 后编码扫描数据、SOF 尺寸/采样信息和非删除段 |
+| 原样复制 | 整文件 token、大小和媒体类型 |
+
+保存的 `actions` 是用于审阅的遮罩记录，不是可被重新导入的信任凭据。伪造、拷贝或编辑一份外部 action JSON，不能让 standalone `verify` 信任过去的变化。任一 token/facet 不符、receipt 缺失或不受信，都必须导致 `unverified`/`incomplete`。
 
 ### 8.5 文件系统元数据边界
 
@@ -533,7 +567,7 @@ sharesafe verify ./original ./prepared-copy --json \
 1. 安装并确认 `pypdf`，以增加可提取文本检查。
 2. 扫描并审阅元数据、动作、附件、表单、批注、加密和结构缺口。
 3. 对图片型页面或视觉涂黑需求使用 OCR/专业 PDF 脱敏工具。
-4. 不使用 ShareSafe v0.1 宣称 PDF 已被净化。
+4. 不使用 ShareSafe 宣称 PDF 已被净化。
 5. 用专业工具另存副本后，可以运行 `verify` 获取保守的重新扫描差异，但字节变化仍会是 `unverified`。
 
 ### 10.4 JPEG、PNG、TIFF、WebP
@@ -541,7 +575,7 @@ sharesafe verify ./original ./prepared-copy --json \
 1. 运行 `doctor` 确认 Pillow 状态。
 2. 扫描元数据，同时人工查看像素中是否出现人脸、地址、二维码、屏幕内容或水印。
 3. JPEG/PNG 可以创建允许列表内的元数据减少副本。
-4. TIFF/WebP 在 v0.1 只提供受限扫描，不提供净化。
+4. TIFF/WebP 只提供受限扫描，不提供净化。
 5. EXIF Orientation 不能安全处理时，ShareSafe 会保留整段 EXIF，避免改变显示方向，并报告不完整。
 
 ### 10.5 ZIP 和嵌套归档
@@ -549,26 +583,15 @@ sharesafe verify ./original ./prepared-copy --json \
 1. 扫描最终归档文件，不要先把不可信成员解压到工作区。
 2. ShareSafe 会把成员名当作虚拟标签，不把它们当作提取路径。
 3. 加密、路径穿越、重复歧义、异常压缩率、过多条目、深层嵌套和不支持的压缩方法都会产生发现或缺口。
-4. v0.1 不提供普通 ZIP 成员的通用净化；应重建一个人工确认的发布归档，再重新扫描。
+4. 当前版本不提供普通 ZIP 成员的通用净化；应重建一个人工确认的发布归档，再重新扫描。
 
 ## 11. 在 Codex 中使用 ShareSafe Skill
 
 ### 11.1 安装
 
-推荐让 Codex 的 `$skill-installer` 从仓库路径安装：
+可以直接从仓库的 `skills/sharesafe` 使用 Skill：将该目录按 Codex 的 Skill 安装方式放入仓库级或用户级 Skill 目录，也可在开发仓库内直接运行 `scripts/run_sharesafe.py`。正式版本以 [GitHub Releases](https://github.com/motanwenzhu/sharesafe/releases) 中的 tag、制品和 `SHA256SUMS` 为准。安装前记录来源版本/摘要，安装后运行 Skill validator 和合成 smoke test。
 
-```text
-使用 $skill-installer 从下面的 GitHub 路径安装 ShareSafe：
-https://github.com/motanwenzhu/sharesafe/tree/main/skills/sharesafe
-```
-
-如果需要可复现版本，把 `main` 换成发布标签，例如：
-
-```text
-https://github.com/motanwenzhu/sharesafe/tree/v0.1.0/skills/sharesafe
-```
-
-也可以把 `skills/sharesafe` 放入仓库或用户级 `.agents/skills`。Codex 会自动发现技能；未出现时重启。位置和发现规则以 [OpenAI 官方“构建技能”文档](https://learn.chatgpt.com/zh-Hans/docs/build-skills) 为准。
+Skill 位置和发现规则以当前 Codex 官方 Skill 文档为准。如果 Skill 未被发现，先检查目录名、`SKILL.md` frontmatter 和安装位置，再重启 Codex。
 
 ### 11.2 调用示例
 
@@ -655,34 +678,27 @@ esac
 
 这个 shell 片段只展示退出码处理，不足以作最终发布门；还必须用 JSON 工具检查 schema、verdict、gap 和 error。
 
-### 12.4 GitHub Actions 示例
+### 12.4 通用 CI 作业示例
 
 ```yaml
-- name: Install ShareSafe release wheel
-  run: python -m pip install --no-deps ./tools/sharesafe-0.1.0-py3-none-any.whl
+- name: Install reviewed local ShareSafe wheel
+  run: python -m pip install --no-deps ./tools/sharesafe-VERSION-py3-none-any.whl
 
-- name: Audit release bundle
+- name: Audit bundle with recorded policy
   shell: bash
   run: |
     set +e
-    sharesafe scan ./dist --json --fail-on medium --report ./sharesafe-ci-report.json
+    sharesafe check ./dist --config ./.sharesafe.toml --json --report ./sharesafe-ci-check.json
     code=$?
     set -e
     test "$code" -eq 0
-
-- name: Upload protected audit report
-  if: always()
-  uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-  with:
-    name: sharesafe-report
-    path: sharesafe-ci-report.json
 ```
 
-生产 CI 应固定 action 和 ShareSafe 制品版本/摘要，并增加 JSON schema 检查。报告工件的可见范围和保留期限也应受控。
+生产 CI 应固定 ShareSafe 制品版本/摘要和策略 digest，并增加 `sharesafe.check/v1` schema 验证。示例故意没有上传报告；如果必须保存 CI artifact，需另行授权，并限制可见范围、保留期和下载人员。
 
 ## 13. 资源限制与大型输入
 
-v0.1 默认限制如下，实际值同时记录在报告的 `run.limits` 中：
+当前默认限制如下，实际值同时记录在报告的 `run.limits` 中：
 
 | 限制 | 默认值 | CLI 可覆盖 |
 |---|---:|---:|
@@ -700,6 +716,11 @@ v0.1 默认限制如下，实际值同时记录在报告的 `run.limits` 中：
 | 归档嵌套深度 | 3 | `--max-archive-depth` |
 | 单个 XML 部件 | 16 MiB | 否 |
 | PDF 页数 | 500 | 否 |
+| 原始名称字节 | 4 KiB | 可通过 policy 固定 |
+| 展示路径字符 | 16,384 | 可通过 policy 固定 |
+| 单报告字段字符 | 16,384 | 可通过 policy 固定 |
+| 总 gap / error | 10,000 / 1,000 | 可通过 policy 固定 |
+| 序列化 JSON 报告 | 32 MiB | 可通过 policy 固定 |
 
 限制是处理不可信输入的安全边界。达到限制时会保留已发现项目，同时产生 gap 和 `incomplete`，不会把被截断的剩余内容当作未发现。
 
@@ -719,7 +740,18 @@ v0.1 默认限制如下，实际值同时记录在报告的 `run.limits` 中：
 | 扫描源码仓库出现 VCS 高风险项 | `.git`/`.hg`/`.svn` 位于分享边界 | 扫描真正的导出/发布目录，不把历史元数据打包 |
 | 明明是文本却显示不支持 | 编码或内容判定不可信 | 转成受支持编码的独立副本，再重新扫描和人工比较 |
 | JSON 消费失败 | 混入终端说明、schema 变化或运行失败 | 使用 `--json`，保存原报告，检查 stderr 和退出码；未知 schema 失败关闭 |
-| PDF 仍然 incomplete | 深层结构、图片页、加密或解析能力有限 | 使用专业 PDF/OCR 工具；ShareSafe v0.1 不承诺完整 PDF 覆盖 |
+| PDF 仍然 incomplete | 深层结构、图片页、加密或解析能力有限 | 使用专业 PDF/OCR 工具；ShareSafe 不承诺完整 PDF 覆盖 |
+| `doctor` 显示 available，`--deep` 却 failed | 包存在但 import/最小合成 parser probe 不可用 | 在受控环境修复版本或依赖；不把 discovery 当可用性证明 |
+| `check` 返回 `review` 但退出 `0` | finding 低于 `fail_on` 且不属于 blocking category | 按组织流程人工复核；不把 `0` 说成安全 |
+| 开启 manifest 后 `check` 始终 `incomplete` | `check` 的 manifest validator 仍没有 exact inventory receipt | 这是预期失败闭合；`prepare` 的计划回执不能冒充 `check` manifest receipt |
+| policy 报 unknown/duplicate/out-of-range | 字段错误、列表重复或限制超出安全边界 | 不删除检查来绕过；对照 `policy show` 生成的归一化字段修正 |
+| `sanitize` 的变化变成 `unverified` | receipt 缺失/不受信、前后 token 不符或 protected facet 变化 | 不重用外部 action JSON；保留原件，对合成复现排查竞态或变换器缺陷 |
+| 报告输出被卫生检查拒绝 | 字段/总大小超限、非相对路径、控制字符或疑似原始 evidence | 停止消费该报告；用合成 canary 报告缺陷，不附真实文件 |
+| `prepare` 未出现在 `--help` | 当前安装版本早于 v0.3 或安装不完整 | 核对 `sharesafe --version` 和安装源；不要猜测参数 |
+| `prepare apply` 报 plan/source drift | plan 后源 inventory 或内容变化 | 不强制应用旧计划；重新 plan、inspect 和 approve |
+| `prepare apply` 报 private staging unavailable | 当前平台无法创建并验证当前用户专用暂存目录 | 更换受支持的本地文件系统/运行环境；不要降级成普通共享临时目录 |
+| `prepare` 结果为 `reporting.detail: truncated` | 动作、问题或最终扫描明细超过报告字节预算 | 输出仍需复核；按省略计数处理为 `incomplete`，在受控环境提高预算后重跑 |
+| apply 失败并提示输出可能存在 | 目标名已被保留后发生提交/竞态/验证失败 | 不分享该目录；检查随机 incomplete marker，换新输出路径并从 plan/approve 重新开始 |
 
 如果遇到内部错误，先运行：
 
@@ -735,13 +767,13 @@ sharesafe --version
 
 ### 15.1 更新
 
-1. 阅读 [CHANGELOG](../CHANGELOG.md) 和新版本 [Release](https://github.com/motanwenzhu/sharesafe/releases)。
-2. 下载同一版本的 wheel、sdist 和 `SHA256SUMS`。
-3. 核对摘要。
+1. 阅读本地 [CHANGELOG](../CHANGELOG.md)、设计契约和 schema 变化。
+2. 从团队已审阅的本地源构建或取得同一版本的 wheel、sdist 和 `SHA256SUMS`。
+3. 核对摘要和制品内容清单。
 4. 在新的虚拟环境安装，而不是直接破坏当前可复现环境。
 5. 运行 `doctor`、`self-test` 和一个合成/非敏感 smoke scan。
 6. 更新 CI 中固定的版本与摘要。
-7. 若使用 Skill，重新安装固定标签版本并确认 Codex 能发现它。
+7. 若使用 Skill，重新安装已记录版本/摘要的本地副本，并确认 Codex 能发现它。
 
 ### 15.2 卸载
 
@@ -757,19 +789,415 @@ Skill 可以从对应 `.agents/skills` 位置移除，或按 OpenAI 官方文档
 
 - [ ] 扫描的是最终准备分享的准确路径，而不是相似目录。
 - [ ] `doctor` 显示当前格式所需能力可用。
+- [ ] 对新环境已运行 `doctor --deep`，并阅读了文件系统安全能力中的 `false` 项。
 - [ ] JSON schema 是预期版本。
+- [ ] 若使用 `check`，已核对 policy digest、ruleset version、technical verdict、policy outcome、reason codes 和退出码。
 - [ ] 没有未解决的 `incomplete`、gap、error 或 partial 工件。
 - [ ] 所有 `block` 和 `review` 项都已按规则、位置和上下文复核。
 - [ ] 若运行了 `sanitize`，输出路径独立，原件未变，并已检查内置复扫和验证。
+- [ ] 任何 `transformed` 都是本次进程 exact receipt 验证的结果，不是从外部 action JSON 推断。
+- [ ] 若使用 prepare，每个 source item 恰有一个 action，已审阅 masked inspection，批准覆盖完整 action ID 集，apply 前无 source drift，且最终输出已复扫。
+- [ ] prepare 结果的 `reporting.detail` 为 `complete`，动作/问题 omitted 计数为 0，且 final scan 没有未解决 gap。
 - [ ] Office 批注、修订、备注、隐藏内容和宏已在格式专用工具中人工检查。
 - [ ] 图片像素和扫描 PDF 页面已人工或用专业 OCR/视觉工具检查。
 - [ ] 报告和副本存放在访问控制合适的位置。
+- [ ] local control plan、approval 和强 source binding 未被放入待分享边界。
 - [ ] 最终发布决定来自人或组织策略，而不是仅来自退出码 `0` 或 `no_findings`。
+
+## 16. v0.2 可复现决策：policy 与 `check`
+
+`scan` 回答“技术扫描看到什么”；`check` 在不改动原生 `sharesafe.report/v1` 的前提下，还固定“当时用了什么有效策略，为什么得到这个进程决策”。对 CI、重复扫描和事后复核，应优先保存 `sharesafe.check/v1`。
+
+### 16.1 创建与验证本地策略
+
+创建一份不覆盖现有文件的默认策略：
+
+```powershell
+sharesafe policy init --out .\.sharesafe.toml --json
+sharesafe policy validate --config .\.sharesafe.toml --json
+sharesafe policy show --config .\.sharesafe.toml --json
+```
+
+`policy init` 的目标必须不存在。`validate` 只表示 TOML 和策略 schema 合法，不表示当前输入已检查。`show` 输出归一化有效策略和其 digest，便于确认数值单位、默认值和列表排序。
+
+当前策略允许的顶层字段只有：
+
+| 字段 | 用途 | 不能做什么 |
+|---|---|---|
+| `fail_on` | 设置哪一严重度起进程阻断 | 不改 finding severity，不压制 finding |
+| `limits` | 固定输入、容器、发现和报告预算 | 不能超过 schema 的安全范围 |
+| `required_capabilities` | 要求 `text`/`metadata`/`hidden_content`/`embedded_objects`/`ocr` 在相关工件上完成或不适用 | 不把 `partial`/`unsupported` 当完成 |
+| `blocking_categories` | 指定一类 finding 无论 severity 都使 policy 阻断 | 不删除原报告中的该类 finding |
+| `optional_tools` | 是否允许使用已安装的 Pillow / `pypdf` | 不自动安装依赖 |
+| `manifest` | 声明需要一份精确输入清单 | 不仅因配置能解析就声称 manifest 已验证 |
+
+一个最小的合成示例：
+
+```toml
+schema = "sharesafe.policy/v1"
+fail_on = "medium"
+required_capabilities = ["metadata", "text"]
+blocking_categories = ["secret"]
+optional_tools = true
+
+[limits]
+max_file_bytes = "50MiB"
+max_archive_depth = 3
+max_report_bytes = "32MiB"
+
+[manifest]
+enabled = false
+require_exact = true
+```
+
+策略解析失败关闭：未知字段、重复列表值、超界限制、非 UTF-8、通配符/环境变量式 manifest 路径、超大策略或读取期间变化都不会产生策略决策。策略不是可执行插件：不包含任意正则、Python、shell 或动态 import。
+
+### 16.2 合并优先级
+
+`check` 严格按下列顺序合并，右侧优先：
+
+```text
+内置默认 < 当前工作目录 ./.sharesafe.toml < 显式 --config < 显式 CLI 参数
+```
+
+它不搜索父目录，不读取用户级全局策略，不从环境变量隐式改变决策。因此自动化应设置可预期的工作目录，并在需要时使用显式 `--config`。
+
+### 16.3 运行 `check`
+
+```powershell
+sharesafe check .\synthetic-share --config .\.sharesafe.toml `
+  --json --report .\reports\synthetic-check.json
+```
+
+CLI 可对部分常用值显式覆盖：
+
+```powershell
+sharesafe check .\synthetic-share --config .\.sharesafe.toml `
+  --fail-on high --no-optional-tools --max-file-size 25MiB --json
+```
+
+`sharesafe.check/v1` 包含：
+
+- 未改动的 `sharesafe.report/v1`；
+- 完整归一化的 effective policy、`sha256:` policy digest 和 `ruleset_version`；
+- `technical_verdict`，即原生扫描技术结论；
+- `policy_outcome`，即 `pass`/`review`/`block`/`incomplete`；
+- 与实际进程返回一致的 `exit_code`；
+- 稳定 `reason_codes`，例如 `coverage_gap_present`、`severity_threshold_met` 或 `findings_below_threshold`；
+- manifest 状态 `not_required`/`missing`/`complete`/`incomplete`。
+
+`policy_outcome: pass` 只表示“当前有效策略没有要求阻断，且没有已知的覆盖不完整”；它不是“安全”、“匿名”或“可分享”。
+
+### 16.4 `check` 退出码
+
+| 决策 | 退出码 | 含义 |
+|---|---:|---|
+| `pass` | `0` | 未命中策略阻断条件；仍需人工核对范围 |
+| `review` | `0` | 存在 finding，但低于阈值且不在 blocking category；不应被忽略 |
+| `block` | `1` | 达到 severity 阈值或 blocking category |
+| `incomplete` | `2` | gap、error、partial/unsupported coverage、缺少 required capability 或 manifest 未精确验证 |
+| 参数/不安全请求 | `3` | 未产生可信 check wrapper |
+| 文件系统/内部失败 | `4` | 未产生可信结论 |
+
+`technical_verdict: block` 与 `policy_outcome: review` 可以同时出现，例如原生报告有 high finding，而显式策略设为 `fail_on = "critical"`。这不是矛盾：前者是技术分类，后者是被记录的本次策略决策。
+
+> [!CAUTION]
+> 当前 manifest 配置只有策略契约。如果 `manifest.enabled = true` 而没有精确 inventory validator 出具成功回执，`check` 必须返回 `incomplete`。不要为了获得退出码 `0` 而关掉这个约束；应等待 v0.3 的精确边界验证闭环。
+
+## 17. v0.2 深度能力、精确规则、receipt 与报告卫生
+
+### 17.1 `doctor --deep`
+
+```powershell
+sharesafe doctor --deep --json
+```
+
+默认 `doctor` 只做 discovery；`--deep` 会离线 import Pillow 和 `pypdf`，用内存中的最小合成 PNG/PDF 执行 probe。它不读用户文件、不安装依赖、不访问网络。应检查：
+
+- `probe_mode` 是 `deep`；
+- 相关可选依赖的 `available`、`usable`、`probe`、`version` 和 `supported_version`；
+- `filesystem_safety.descriptor_identity_before_read`、`final_component_nofollow`、`parent_directory_handle_anchoring`、`exclusive_destination_creation`、`private_temporary_staging_fail_closed` 和 `private_temporary_staging_permission`；
+- `status` 是否为 `ready`。
+
+`ready` 只说明核心运行时和已安装 parser 的合成 probe 可用。例如当前平台如果报告 `parent_directory_handle_anchoring: false`，并发父目录替换仍是明示加固缺口，不应被 `status: ready` 隐藏。
+
+### 17.2 `rules --detail --json`
+
+```powershell
+sharesafe rules --detail --json
+```
+
+精确目录为每条规则输出 `rule_id`、`category`、`default_severity`、`confidence`、`formats`、`representations`、`validator` 和 `automatic_remediation`，并记录 `ruleset_version`。这适合生成审阅清单和确认 policy 中的 category；它不包含匹配到的原始值，也不是关闭单条 detector 的接口。`automatic_remediation: true` 只表示存在某个受支持的窄变换，不表示当前文件一定能无损处理。
+
+### 17.3 报告卫生机械门禁
+
+在 JSON stdout 或报告文件写入前，统一卫生检查会验证：
+
+1. 公开报告字段结构与类型；
+2. evidence 模式和只允许遮罩值的字段组合；
+3. 展示路径是相对、无控制字符，且不包含已知 home/UNC/绝对根形状；
+4. 单字段和总 JSON 大小预算；
+5. `error` 不含底层 exception 原文；
+6. 嵌套在 `check`、`sanitize`、`verify` 或 `prepare-result` 中的每个 `sharesafe.report/v1` 也受同样检查。
+
+卫生失败时应停止消费该输出，不得回读原文来“修复” evidence。如果是产品缺陷，只用合成 canary 和合成路径构造最小复现。
+
+名称与报告预算包括 `max_name_bytes`、`max_display_path_chars`、`max_report_field_chars`、`max_gaps_total`、`max_errors_total` 和 `max_report_bytes`。达到限制不能静默丢弃：应使用固定不可逆 placeholder，保留控制用 gap/summary 空间，并把本次结果保持为 `incomplete`。
+
+### 17.4 本地报告展示与结构差异
+
+> [!NOTE]
+> 以当前 `sharesafe report --help` 核对参数；`show`、`diff` 和 `share-summary` 都只消费已保存的遮罩报告，不读取原始输入。
+
+```powershell
+sharesafe report show .\reports\synthetic-check.json --group-by rule --min-severity medium
+sharesafe report diff .\reports\older.json .\reports\newer.json --json
+```
+
+`show` 必须仅消费已遮罩报告，不去原始路径回读内容。`diff` 只能说明“同一 rule/path/location 结构仍存在”、`structure-new`、`structure-resolved` 以及 schema/ruleset/policy 变化。由于 evidence token 和 content token 默认使用 run-scoped HMAC，跨运行 diff 不能声称字节相同、敏感值相同，也不能替代本次退出码。
+
+## 18. v0.3 可验证分享包流程
+
+`prepare` 解决的是“如何从混杂源目录构建一个成员明确、动作逐项批准、关系可重算的新分享目录”。它不使用默认 ignore，也不会因为某个文件没出现在决策里就悄悄跳过。完整命令序列如下：
+
+```text
+sharesafe prepare plan SOURCE --decisions DECISIONS.json --out-plan PLAN.json --json
+sharesafe prepare inspect PLAN.json --json
+sharesafe prepare approve PLAN.json --out-approval APPROVAL.json --approve-all --json
+sharesafe prepare apply PLAN.json --approval APPROVAL.json --source SOURCE --out NEW_OUTPUT_DIRECTORY --json
+sharesafe prepare verify PLAN.json --source SOURCE --output NEW_OUTPUT_DIRECTORY --json
+```
+
+`DECISIONS.json`、`PLAN.json` 和 `APPROVAL.json` 都是本地控制工件，不是可分享报告。它们应放在 `SOURCE` 和最终输出之外，并按敏感文件保护。
+
+### 18.1 先写完整决策文件
+
+最小结构如下；示例中的文件名和内容都应替换为当前源目录的合成或真实相对路径，但每个普通文件必须恰好出现一次：
+
+```json
+{
+  "schema": "sharesafe.prepare-decisions/v1",
+  "classification": "local_only_do_not_share",
+  "source_boundary": "<selected-source>",
+  "actions": [
+    {
+      "source_path": "public/readme.txt",
+      "target_path": "public/readme.txt",
+      "action": "copy_unchanged",
+      "reason_code": "explicit_include"
+    },
+    {
+      "source_path": "draft/internal.txt",
+      "target_path": null,
+      "action": "omit_from_boundary",
+      "reason_code": "internal_only"
+    },
+    {
+      "source_path": "old-name.txt",
+      "target_path": "renamed.txt",
+      "action": "rename_in_bundle",
+      "reason_code": "release_name"
+    },
+    {
+      "source_path": "image.png",
+      "target_path": "image.png",
+      "action": "strip_png_metadata",
+      "reason_code": "metadata_detected"
+    }
+  ]
+}
+```
+
+顶层和 action 对象都拒绝未知字段。`reason_code` 只能使用稳定的小写代码，而不是把敏感说明或原始证据写进去。决策文件不是 ShareSafe 自动生成的忽略列表：应由用户、团队规则或上游程序明确产生。
+
+动作含义与最低验证关系如下：
+
+| Action | 用户意图 | 执行与验证条件 |
+|---|---|---|
+| `copy_unchanged` | 原路径原样纳入 | `target_path` 必须等于源相对路径；字节、媒体类型和大小一致 |
+| `rename_in_bundle` | 改成另一个包内相对路径 | 字节和媒体类型不变；新旧路径无冲突，旧名不残留 |
+| `omit_from_boundary` | 不进入新边界 | `target_path` 必须为 `null`；该路径及其树不能被其他 target 复活 |
+| `strip_ooxml_metadata` | 只删除允许列表内 OOXML 元数据 | 媒体类型匹配、变换实际发生、receipt 和 protected facets 全部通过 |
+| `strip_png_metadata` | 只删除受支持 PNG 元数据块 | 变换实际发生；像素/关键容器表示保持 |
+| `strip_jpeg_metadata` | 只删除受支持 JPEG 元数据段 | 变换实际发生；编码扫描数据和受保护段保持 |
+| `manual_or_external_required` | 当前内核不能可信自动处理 | 计划保留审阅信息，但 `executable` 为 false，不能批准/应用 |
+| `block` | 当前边界明确禁止构建 | 计划不可执行 |
+
+如果给某个没有可删除元数据的 PNG/JPEG/OOXML 指定 `strip_*`，apply 会以 `transform_not_applied` 失败，而不会把一次无变化复制伪装成已净化。
+
+### 18.2 五阶段操作
+
+```mermaid
+flowchart LR
+    A[plan<br/>完整 inventory + SHA-256 绑定] --> B[inspect<br/>遮罩视图人工审阅]
+    B --> C[approve<br/>完整 action ID + exact plan]
+    C --> D[apply<br/>私有 staging + 独占新目录]
+    D --> E[verify<br/>重算关系 + 最终复扫]
+    E --> F[人工/组织发布决策]
+```
+
+#### 阶段一：plan
+
+```powershell
+sharesafe prepare plan .\source `
+  --decisions .\control\decisions.json `
+  --out-plan .\control\plan.json `
+  --json
+```
+
+ShareSafe 会枚举完整源边界、拒绝空 inventory、链接/reparse point、硬链接和特殊文件，为每项计算媒体类型、大小与稳定 SHA-256 source binding，再把这些数据和 action 一起纳入 canonical `plan_digest`。计划写入采用严格 UTF-8 JSON、拒绝 BOM/重复 key/NaN/Infinity/非法 surrogate，并且目标必须尚不存在。
+
+成功回执 `sharesafe.prepare-control-write/v1` 只显示是否创建、项目数、是否可执行，以及权限/发布保证；不会把计划内容输出到普通报告。POSIX 控制文件必须验证为当前用户 `0600`；Windows 必须验证为受保护、仅当前用户的 DACL。发布使用同目录 hard-link create-new；不支持时失败关闭。
+
+#### 阶段二：inspect
+
+```powershell
+sharesafe prepare inspect .\control\plan.json --json
+```
+
+`sharesafe.prepare-inspection/v1` 显示遮罩后的 source/target 路径、动作、理由代码、媒体类型、预期关系和已知损失，但省略 source digest 与 `plan_digest`。逐项确认：
+
+- 每个预期分享文件都在；
+- 每个私有文件都明确 omit；
+- rename 的目标准确且不会造成语义误导；
+- strip 的格式与预期一致；
+- `item_count` 和各动作计数合理；
+- `executable` 为 true。
+
+Inspect 不产生批准，也不授权写输出。
+
+#### 阶段三：approve
+
+```powershell
+sharesafe prepare approve .\control\plan.json `
+  --out-approval .\control\approval.json `
+  --approve-all `
+  --json
+```
+
+必须显式写出 `--approve-all`。v0.3 不支持只批准部分 action：approval 必须覆盖完整且无重复的 action ID 集，并绑定 exact plan digest。计划不可执行、action 少一项/多一项/重复、approval 对应另一计划或任一 canonical checksum 被修改时，后续操作都会拒绝。
+
+> [!CAUTION]
+> Plan/approval digest 是一致性校验，不是数字签名、人工身份认证或不可抵赖历史。拥有同一账户写权限的恶意进程可以同步重写 decisions、plan、approval 并重算摘要。控制目录必须位于用户信任的本地访问边界。
+
+#### 阶段四：apply
+
+```powershell
+sharesafe prepare apply .\control\plan.json `
+  --approval .\control\approval.json `
+  --source .\source `
+  --out .\release-new `
+  --json `
+  --report .\reports\prepare-result.json
+```
+
+输出必须是尚不存在的新目录，并且不能与 source 相同、位于 source 内部或包含 source。报告文件也必须尚不存在，且不能位于 source、output、plan 或 approval 冲突范围内。
+
+Apply 的实际顺序是：
+
+1. 严格读取并重新验证 plan/approval；
+2. 重新枚举并哈希整个 source，与 exact plan 比较；
+3. 在系统临时位置创建随机名的私有 staging root；Windows 原子设置并验证 current-user-only、受保护且对子项可继承的 DACL，POSIX 验证当前有效用户和 `0700`；不能证明权限时在保留 output 之前失败；
+4. 对每个源文件执行 descriptor-bound 读取，只运行 allowlist 动作；
+5. 再做一次完整 source drift 检查，并验证 staging 的文件、目录、媒体类型、大小和精确预期字节；
+6. 检查 output parent identity，独占创建 output 与随机 incomplete marker；每个目录和文件都用 create-new 语义落地，不使用可覆盖的 rename；
+7. 删除 marker 后验证已提交树；
+8. 用同一临时 HMAC key 做最终扫描，把 Scanner 实际读到的 path/media/size/content token 多重集与预期字节绑定；
+9. 扫描后再次验证整个输出树，再生成有界结果。
+
+Staging 刻意不放在目标父目录：这样目标父目录被替换时，不会把预提交 payload 写进替代目录。最终发布仍然依赖路径身份检查点，而不是跨平台目录句柄锚定；检查成功与下一次路径操作之间仍存在残余竞态。因此 source、control 和 destination parent 都应放在没有不受信并发写者的位置。
+
+#### 阶段五：verify
+
+```powershell
+sharesafe prepare verify .\control\plan.json `
+  --source .\source `
+  --output .\release-new `
+  --json
+```
+
+独立 verify 仍必须提供原始 `SOURCE`。Plan 保存的 digest 能发现漂移，却不能单独重建并证明 OOXML 非元数据结构、PNG 像素表示或 JPEG 编码扫描数据未变化；验证器必须从 source 重算 exact expected bytes 和 preserved facets。它不会使用 approval，因为 verify 不写输出，但 plan 必须可执行且 source 必须仍与之匹配。
+
+### 18.3 路径、漂移与竞态拒绝
+
+Plan 阶段会拒绝 `..`、`.`/空组件、绝对路径、UNC、Windows ADS、保留设备名、末尾点/空格、反斜杠歧义、Unicode 非 NFC、大小写折叠/NFC/tree collision，以及文件与祖先路径冲突。omit/rename 的旧路径不能被另一 target 本身或其后代路径重新建立。
+
+下列情况必须从 plan 或 inspect 重新开始，不应手工改 digest 绕过：
+
+- source 新增、删除、替换、改名、媒体类型或字节变化；
+- plan/approval 被编辑或属于另一组工件；
+- output 已存在或与 source 相交；
+- 提交期间出现竞争文件/目录、父目录 identity 改变或 staging identity 改变；
+- 最终输出多出空目录、多/少文件、关系不符，或扫描期间字节被替换；
+- transform 没有实际应用或 protected facet 不符。
+
+目标名被独占保留之后发生故障时，CLI 会用稳定错误码说明“不完整输出可能仍存在”。ShareSafe 不会在目录 identity 不可信时递归删除它，因为那可能删除攻击者替换的路径。看到 `.sharesafe-incomplete-*` marker 或这类错误时，绝不能分享该目录；保留证据或按本地恢复策略处理，然后换一个新 output 名称重做。
+
+### 18.4 工件、结果字段与数据分级
+
+| 工件 | Schema | 分级 | 关键内容 |
+|---|---|---|---|
+| decisions | `sharesafe.prepare-decisions/v1` | D3 本地控制 | 人工/上游显式 source-target-action-reason |
+| plan | `sharesafe.prepare-plan/v1` | D3 本地控制 | 完整 inventory、SHA-256 source binding、动作与 plan digest |
+| approval | `sharesafe.prepare-approval/v1` | D3 本地控制 | exact plan digest、完整 action ID、approval digest |
+| control write receipt | `sharesafe.prepare-control-write/v1` | D2 遮罩回执 | owner-only 权限和 exclusive publication 保证 |
+| inspection | `sharesafe.prepare-inspection/v1` | D2 遮罩审阅 | 不含强 digest 的逐项动作视图 |
+| result | `sharesafe.prepare-result/v1` | D2 遮罩详细报告 | 动作摘要、commit、精确验证、最终扫描与报告预算状态 |
+
+读取 result 时至少检查：
+
+- `plan_summary.action_count/action_counts` 与预期相符；
+- `action_results_omitted == 0`；
+- `commit.state` 对 apply 为 `committed`，对 verify 为 `not_applicable`；
+- `verification.outcome == "verified"`；
+- `issue_count == 0`、`issues_omitted == 0`；
+- `final_scan.summary.verdict`、findings、gaps 和 errors；
+- `reporting.detail == "complete"` 且 `final_scan_detail == "complete"`；
+- `ready_for_review` 只作为“可以进入人工复核”的提示，不能当发布许可。
+
+如果完整 prepare result 超过 `reporting.max_bytes`，ShareSafe 不会在 stdout 或文件中写半截 JSON。它会保留一个完整可解析的较小结果，加入 `prepare_result_size_limit`，明确记录 action/issue 的 reported 与 omitted 数量，必要时把嵌套 final scan 换成只含 reporting gap 的最小合法报告，同时强制 `verification.outcome: incomplete`、`ready_for_review: false` 和退出码 `2`。这在 output 已经 commit 后同样适用。
+
+### 18.5 退出码与停止条件
+
+| 退出码 | Prepare 含义 | 操作 |
+|---:|---|---|
+| `0` | 精确关系通过、最终扫描覆盖完整，且没有 finding 达到 `--fail-on` | 仍进入人工/组织复核，不自动发布 |
+| `1` | 精确关系可以通过，但最终扫描 finding 达到阈值 | 阻断分享，处理 finding 后从新 source/plan 开始 |
+| `2` | 关系问题、覆盖 gap、扫描快照不符或报告明细超预算 | 视为未完成；解决缺口后重跑 |
+| `3` | 控制数据、参数、路径、批准或请求不安全/无效 | 不写或不继续写；修正后重新 plan/approve |
+| `4` | staging、提交、文件系统或内部故障 | 没有可信结论；若提示 output 可能存在，按不完整目录处理 |
+
+任何退出码 `0` 仍不是分享授权。尤其是“精确 byte relation 已验证”只说明动作没有超出计划关系，不代表 detector 覆盖了所有语义、像素、隐藏内容或业务敏感性。
+
+## 19. 数据分级、保管与流转
+
+ShareSafe 是本地工具，但“本地生成”不等于“可以随意上传”。建议按下表分级：
+
+| 级别 | 典型数据 | 建议处理 |
+|---|---|---|
+| D0 公开文档 | 不含本地结果的手册、schema、默认策略模板 | 审阅后可随产品交付 |
+| D1 最小化摘要 | 只有计数/类别的派生 summary，无路径、大小、token、时间和逐项 evidence | 仍需主人明确授权后才能离开本机；当前如无专门生成器，不手工猜测转换 |
+| D2 遮罩详细报告 | scan/check/sanitize/verify JSON，含相对文件名、结构、大小、类别和临时 token | 受限内部访问；默认不上传，设置保留期 |
+| D3 本地控制工件 | `.sharesafe.toml`、local control plan、approval、source binding、强 digest 和完整 inventory | owner-only 或等价权限；醒目标注“仅本地/禁止分享”；不放进待分享边界 |
+| D4 原始敏感输入 | 原文件、原始元数据、未遮罩值、临时解析字节 | 最小权限；不进对话、日志、issue 或普通 CI artifact |
+
+一次完整的数据流应是：
+
+```text
+D4 SOURCE --受限本地读--> 内存检测/遮罩
+          --> D2 masked report/check
+          --> D3 local plan + approval
+          --> 受控 staging --> 新 OUTPUT
+          --> D2 final receipt + after report
+          --> 人工/组织决策
+```
+
+清理时要区分“临时 staging”和“已 exclusive commit 的新输出”：前者可按失败恢复流程清理；后者是用户已获得的新工件，不应因后续报告失败而被静默删除。
 
 ## 延伸阅读
 
 - [设计方案与各部分流程](design-and-workflows.zh-CN.md)
-- [v0.1 支持矩阵](../SUPPORT_MATRIX.md)
+- [支持矩阵](../SUPPORT_MATRIX.md)
 - [威胁模型](../THREAT_MODEL.md)
 - [安全政策](../SECURITY.md)
 - [JSON 报告消费契约](../skills/sharesafe/references/report-contract.md)

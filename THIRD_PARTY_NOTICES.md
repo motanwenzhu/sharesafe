@@ -1,6 +1,6 @@
 # Third-party notices
 
-ShareSafe itself is licensed under the Apache License 2.0. This file records direct dependencies declared for v0.1; it is informational and does not replace the license files distributed by those projects.
+ShareSafe itself is licensed under the Apache License 2.0. This file records direct dependencies declared for v0.3; it is informational and does not replace the license files distributed by those projects.
 
 No third-party project source code, model, rule corpus, binary, fixture, or media asset is intentionally vendored in this repository. Installed Python distributions retain their own license metadata and notices.
 

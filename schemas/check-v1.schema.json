@@ -1,0 +1,193 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:sharesafe:schema:check:v1",
+  "title": "ShareSafe policy check v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "tool", "policy", "decision", "report"],
+  "properties": {
+    "schema": {"const": "sharesafe.check/v1"},
+    "tool": {"$ref": "urn:sharesafe:schema:report:v1#/$defs/tool"},
+    "policy": {"$ref": "#/$defs/policyReceipt"},
+    "decision": {"$ref": "#/$defs/decision"},
+    "report": {"$ref": "urn:sharesafe:schema:report:v1"}
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "policy": {
+            "properties": {
+              "manifest": {
+                "properties": {"enabled": {"const": true}},
+                "required": ["enabled"]
+              }
+            },
+            "required": ["manifest"]
+          }
+        },
+        "required": ["policy"]
+      },
+      "then": {
+        "properties": {
+          "decision": {
+            "properties": {
+              "manifest_validation": {"enum": ["missing", "complete", "incomplete"]}
+            }
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "decision": {
+            "properties": {"manifest_validation": {"const": "not_required"}}
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "decision": {
+            "properties": {"manifest_validation": {"enum": ["missing", "incomplete"]}},
+            "required": ["manifest_validation"]
+          }
+        },
+        "required": ["decision"]
+      },
+      "then": {
+        "properties": {
+          "decision": {
+            "properties": {
+              "policy_outcome": {"const": "incomplete"},
+              "exit_code": {"const": 2}
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "policy": {
+            "properties": {
+              "manifest": {
+                "properties": {
+                  "enabled": {"const": true},
+                  "require_exact": {"const": false}
+                },
+                "required": ["enabled", "require_exact"]
+              }
+            },
+            "required": ["manifest"]
+          }
+        },
+        "required": ["policy"]
+      },
+      "then": {
+        "properties": {
+          "decision": {
+            "properties": {
+              "manifest_validation": {"const": "incomplete"},
+              "policy_outcome": {"const": "incomplete"},
+              "exit_code": {"const": 2}
+            }
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "policyReceipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "digest",
+        "ruleset_version",
+        "fail_on",
+        "limits",
+        "required_capabilities",
+        "blocking_categories",
+        "optional_tools",
+        "manifest"
+      ],
+      "properties": {
+        "schema": {"const": "sharesafe.policy/v1"},
+        "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+        "ruleset_version": {"type": "string", "pattern": "^sharesafe\\.rules\\/v[1-9][0-9]*$"},
+        "fail_on": {"enum": ["info", "low", "medium", "high", "critical", "never"]},
+        "limits": {"$ref": "urn:sharesafe:schema:policy:v1#/$defs/limits"},
+        "required_capabilities": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"enum": ["embedded_objects", "hidden_content", "metadata", "ocr", "text"]}
+        },
+        "blocking_categories": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$"
+          }
+        },
+        "optional_tools": {"type": "boolean"},
+        "manifest": {"$ref": "urn:sharesafe:schema:policy:v1#/$defs/manifest"}
+      }
+    },
+    "decision": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["technical_verdict", "policy_outcome", "exit_code", "manifest_validation", "reason_codes"],
+      "properties": {
+        "technical_verdict": {"enum": ["no_findings", "review", "block", "incomplete"]},
+        "policy_outcome": {"enum": ["pass", "review", "block", "incomplete"]},
+        "exit_code": {"enum": [0, 1, 2]},
+        "manifest_validation": {"enum": ["not_required", "missing", "complete", "incomplete"]},
+        "reason_codes": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "scan_error_present",
+              "coverage_gap_present",
+              "partial_artifact_present",
+              "optional_dependency_unavailable",
+              "technical_incomplete_reported",
+              "manifest_validation_missing",
+              "manifest_validation_incomplete",
+              "manifest_not_exact",
+              "required_capability_incomplete",
+              "blocking_category_present",
+              "severity_threshold_met",
+              "technical_block_reported",
+              "findings_below_threshold",
+              "no_findings_observed"
+            ]
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"policy_outcome": {"const": "incomplete"}}, "required": ["policy_outcome"]},
+          "then": {"properties": {"exit_code": {"const": 2}}}
+        },
+        {
+          "if": {"properties": {"policy_outcome": {"const": "block"}}, "required": ["policy_outcome"]},
+          "then": {"properties": {"exit_code": {"const": 1}}}
+        },
+        {
+          "if": {"properties": {"policy_outcome": {"enum": ["pass", "review"]}}, "required": ["policy_outcome"]},
+          "then": {"properties": {"exit_code": {"const": 0}}}
+        },
+        {
+          "if": {"properties": {"technical_verdict": {"const": "incomplete"}}, "required": ["technical_verdict"]},
+          "then": {"properties": {"policy_outcome": {"const": "incomplete"}}}
+        }
+      ]
+    }
+  }
+}

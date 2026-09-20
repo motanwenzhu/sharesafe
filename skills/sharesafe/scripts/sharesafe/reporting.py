@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import errno
 import os
 from pathlib import Path
@@ -10,27 +9,40 @@ import tempfile
 from typing import Any, TextIO
 
 from .path_safety import uses_windows_alternate_stream
+from .report_hygiene import validate_masked_payload, validated_json_text
+from .safe_io import DirectorySnapshot, prepare_verified_parent, verify_directory_unchanged
 
 
 def json_text(payload: dict[str, Any]) -> str:
-    return json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+    return validated_json_text(payload)
+
+
+def _assert_report_parent(snapshot: DirectorySnapshot) -> None:
+    if not verify_directory_unchanged(snapshot):
+        raise OSError("report destination parent changed during output")
 
 
 def write_json_atomic(path: Path, payload: dict[str, Any]) -> None:
+    # Render first.  A hygiene or size failure must occur before a temporary or
+    # destination file exists, so callers can never mistake a JSON prefix for a
+    # complete valid report.
+    rendered = json_text(payload)
     path = path.absolute()
     if uses_windows_alternate_stream(path):
         raise ValueError("Windows alternate data stream report paths are not supported")
     if path.exists() or path.is_symlink():
         raise FileExistsError("report destination already exists")
-    path.parent.mkdir(parents=True, exist_ok=True)
-    descriptor, temporary = tempfile.mkstemp(prefix=".sharesafe-report-", suffix=".tmp", dir=path.parent)
+    parent_snapshot = prepare_verified_parent(path)
+    parent = parent_snapshot.path
+    _assert_report_parent(parent_snapshot)
+    descriptor, temporary = tempfile.mkstemp(prefix=".sharesafe-report-", suffix=".tmp", dir=parent)
     temp_path = Path(temporary)
     try:
         with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as handle:
-            json.dump(payload, handle, ensure_ascii=False, indent=2, sort_keys=True)
-            handle.write("\n")
+            handle.write(rendered)
             handle.flush()
             os.fsync(handle.fileno())
+        _assert_report_parent(parent_snapshot)
         try:
             os.link(temp_path, path, follow_symlinks=False)
         except FileExistsError as exc:
@@ -38,6 +50,7 @@ def write_json_atomic(path: Path, payload: dict[str, Any]) -> None:
         except (NotImplementedError, OSError) as exc:
             if isinstance(exc, OSError) and exc.errno == errno.EEXIST:
                 raise FileExistsError("report destination appeared while writing; nothing was overwritten") from exc
+            _assert_report_parent(parent_snapshot)
             try:
                 descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0), 0o600)
             except FileExistsError as nested:
@@ -57,53 +70,65 @@ def write_json_atomic(path: Path, payload: dict[str, Any]) -> None:
                 except OSError:
                     pass
                 raise
+        _assert_report_parent(parent_snapshot)
     finally:
-        if temp_path.exists():
-            temp_path.unlink()
+        try:
+            _assert_report_parent(parent_snapshot)
+        except (OSError, ValueError):
+            # Re-resolving a temporary filename through a replaced parent could
+            # delete an attacker's file.  A private orphan is safer than that.
+            pass
+        else:
+            if temp_path.exists():
+                temp_path.unlink()
 
 
 def render_scan(report: dict[str, Any], stream: TextIO) -> None:
+    validate_masked_payload(report)
     summary = report["summary"]
     counts = summary["findings"]
-    stream.write(
+    lines = [
         f"ShareSafe: {summary['verdict']} | artifacts {summary['artifacts_total']} | "
         f"findings C:{counts['critical']} H:{counts['high']} M:{counts['medium']} "
         f"L:{counts['low']} I:{counts['info']} | gaps {summary['gaps']}\n"
-    )
+    ]
     artifacts = {item["id"]: item for item in report.get("artifacts", [])}
     for finding in report.get("findings", []):
         path = artifacts.get(finding["artifact_id"], {}).get("path", "<unknown>")
-        stream.write(f"- [{finding['severity'].upper()}] {finding['rule_id']} — {path}: {finding['title']}\n")
+        lines.append(f"- [{finding['severity'].upper()}] {finding['rule_id']} — {path}: {finding['title']}\n")
     for gap in report.get("gaps", []):
         artifact = artifacts.get(gap.get("artifact_id"), {})
         path = artifact.get("path", "<scan boundary>")
-        stream.write(f"- [INCOMPLETE] {path}: {gap['capability']} / {gap['reason']}\n")
+        lines.append(f"- [INCOMPLETE] {path}: {gap['capability']} / {gap['reason']}\n")
     if summary["verdict"] == "no_findings":
-        stream.write("No findings were observed within completed coverage. This is not a guarantee of safety.\n")
+        lines.append("No findings were observed within completed coverage. This is not a guarantee of safety.\n")
     else:
-        stream.write("Review findings and all coverage gaps before sharing.\n")
+        lines.append("Review findings and all coverage gaps before sharing.\n")
+    stream.write("".join(lines))
 
 
 def render_operation(payload: dict[str, Any], stream: TextIO) -> None:
+    validate_masked_payload(payload)
     operation = payload.get("operation", "operation")
     verification = payload.get("verification", {})
     counts = verification.get("counts", {})
-    stream.write(
+    lines = [
         f"ShareSafe {operation}: {verification.get('outcome', 'unknown')} | "
         f"resolved {counts.get('resolved', 0)} | remaining {counts.get('remaining', 0)} | "
         f"introduced {counts.get('introduced', 0)} | "
         f"integrity {verification.get('integrity', {}).get('outcome', 'unknown')}\n"
-    )
+    ]
     for action in payload.get("actions", []):
         if action.get("status") in {"unsupported", "skipped", "partial", "failed"}:
             reason = f" ({action['reason']})" if action.get("reason") else ""
-            stream.write(
+            lines.append(
                 f"- [TRANSFORM {str(action.get('status')).upper()}] "
                 f"{action.get('path', '<artifact>')}: {action.get('action', 'unknown')}{reason}\n"
             )
     for issue in verification.get("integrity", {}).get("issues", []):
-        stream.write(
+        lines.append(
             f"- [UNVERIFIED] {issue.get('path', '<artifact>')}: "
             f"{issue.get('code', 'integrity_issue')}\n"
         )
-    stream.write(f"{verification.get('statement', 'Review the JSON report before sharing.')}\n")
+    lines.append(f"{verification.get('statement', 'Review the JSON report before sharing.')}\n")
+    stream.write("".join(lines))

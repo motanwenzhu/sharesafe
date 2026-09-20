@@ -7,11 +7,14 @@ report or console display.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 import hashlib
 import hmac
 import re
 import secrets
 import unicodedata
+
+from .limits import DEFAULT_MAX_DISPLAY_PATH_CHARS, DEFAULT_MAX_NAME_BYTES
 
 
 _WINDOWS_HOME_RE = re.compile(
@@ -39,7 +42,163 @@ _RELATIVE_HOME_RE = re.compile(
     r"(?P<user>[^\\/!:\x00-\x1f]+)"
 )
 _DISPLAY_CONTROL_RE = re.compile(r"[\x00-\x1f\x7f-\x9f]")
+_PATH_COMPONENT_RE = re.compile(r"[^\\/]+")
 _USER_HOME_CONTAINERS = frozenset({"users", "home", "documents and settings"})
+NAME_LIMIT_PLACEHOLDER = "<name:omitted-limit>"
+DISPLAY_PATH_LIMIT_PLACEHOLDER = "<path:omitted-limit>"
+
+
+@dataclass(frozen=True, slots=True)
+class DisplayPathResult:
+    """A display-only path plus any fail-closed resource-limit reasons."""
+
+    value: str
+    limit_reasons: tuple[str, ...] = ()
+
+
+def _utf8_size_exceeds(value: str, limit: int) -> bool:
+    """Check a UTF-8 byte bound without allocating an encoded copy."""
+
+    total = 0
+    for character in value:
+        codepoint = ord(character)
+        if codepoint <= 0x7F:
+            total += 1
+        elif codepoint <= 0x7FF:
+            total += 2
+        elif codepoint <= 0xFFFF:
+            # This also matches ``surrogatepass`` for filesystem surrogate
+            # escapes, which must never make report generation fail open.
+            total += 3
+        else:
+            total += 4
+        if total > limit:
+            return True
+    return False
+
+
+def path_limit_reasons(
+    path: str,
+    *,
+    max_name_bytes: int = DEFAULT_MAX_NAME_BYTES,
+    max_display_path_chars: int = DEFAULT_MAX_DISPLAY_PATH_CHARS,
+) -> tuple[str, ...]:
+    """Return deterministic reasons that make a raw path unsafe to process fully."""
+
+    if not isinstance(path, str):
+        raise TypeError("path must be str")
+    if max_name_bytes <= 0 or max_display_path_chars <= 0:
+        raise ValueError("path limits must be greater than zero")
+
+    reasons: list[str] = []
+    components = _PATH_COMPONENT_RE.finditer(path)
+    if any(
+        component.group(0) == NAME_LIMIT_PLACEHOLDER
+        or _utf8_size_exceeds(component.group(0), max_name_bytes)
+        for component in components
+    ):
+        reasons.append("name_limit")
+    if path == DISPLAY_PATH_LIMIT_PLACEHOLDER or len(path) > max_display_path_chars:
+        reasons.append("display_path_limit")
+    return tuple(reasons)
+
+
+def _replace_oversized_components(path: str, max_name_bytes: int) -> tuple[str, bool]:
+    pieces: list[str] = []
+    cursor = 0
+    limited = False
+    for component in _PATH_COMPONENT_RE.finditer(path):
+        pieces.append(path[cursor : component.start()])
+        value = component.group(0)
+        if value == NAME_LIMIT_PLACEHOLDER or _utf8_size_exceeds(value, max_name_bytes):
+            pieces.append(NAME_LIMIT_PLACEHOLDER)
+            limited = True
+        else:
+            pieces.append(value)
+        cursor = component.end()
+    pieces.append(path[cursor:])
+    return "".join(pieces), limited
+
+
+def _mask_controls_bounded(value: str, limit: int) -> str | None:
+    """Expand terminal controls only while the output remains within ``limit``."""
+
+    pieces: list[str] = []
+    cursor = 0
+    total = 0
+    for match in _DISPLAY_CONTROL_RE.finditer(value):
+        literal = value[cursor : match.start()]
+        replacement = _mask_control_characters(match.group(0))
+        total += len(literal) + len(replacement)
+        if total > limit:
+            return None
+        pieces.extend((literal, replacement))
+        cursor = match.end()
+    tail = value[cursor:]
+    if total + len(tail) > limit:
+        return None
+    pieces.append(tail)
+    return "".join(pieces)
+
+
+class _FenwickOccupancy:
+    """Range occupancy for priority-ordered intervals in O(log n) per query."""
+
+    def __init__(self, size: int) -> None:
+        self._tree = [0] * (size + 1)
+
+    def _prefix(self, end: int) -> int:
+        total = 0
+        index = end
+        while index > 0:
+            total += self._tree[index]
+            index -= index & -index
+        return total
+
+    def occupied(self, start: int, end: int) -> bool:
+        return self._prefix(end) != self._prefix(start)
+
+    def mark(self, index: int) -> None:
+        cursor = index + 1
+        while cursor < len(self._tree):
+            self._tree[cursor] += 1
+            cursor += cursor & -cursor
+
+
+def _select_non_overlapping(
+    candidates: list[tuple[object, int, int]],
+) -> list[tuple[object, int, int]]:
+    """Apply the existing confidence/length priority without quadratic scans.
+
+    Accepted intervals are disjoint, so each elementary coordinate segment is
+    marked at most once.  Sorting dominates the total O(n log n) work.
+    """
+
+    if not candidates:
+        return []
+    boundaries = sorted({position for _, start, end in candidates for position in (start, end)})
+    coordinate = {position: index for index, position in enumerate(boundaries)}
+    occupancy = _FenwickOccupancy(max(0, len(boundaries) - 1))
+    selected: list[tuple[object, int, int]] = []
+    for hit, start, end in sorted(
+        candidates,
+        key=lambda item: (
+            -item[0].confidence,
+            -(item[2] - item[1]),
+            item[1],
+            item[0].rule_id,
+        ),
+    ):
+        left = coordinate[start]
+        right = coordinate[end]
+        if left >= right or occupancy.occupied(left, right):
+            continue
+        selected.append((hit, start, end))
+        # No accepted interval overlaps another accepted interval.  Across the
+        # full algorithm, each segment therefore incurs at most one update.
+        for segment in range(left, right):
+            occupancy.mark(segment)
+    return selected
 
 
 def temporary_hmac_key(length: int = 32) -> bytes:
@@ -135,23 +294,46 @@ def mask_value(value: str, value_class: str) -> str:
     return f"<{label}:redacted>"
 
 
-def sanitize_display_path(path: str) -> str:
-    """Remove user-identifying components and embedded PII from a display path.
+def sanitize_display_path_result(
+    path: str,
+    *,
+    max_name_bytes: int = DEFAULT_MAX_NAME_BYTES,
+    max_display_path_chars: int = DEFAULT_MAX_DISPLAY_PATH_CHARS,
+) -> DisplayPathResult:
+    """Return a bounded, masked display path and explicit limit reasons.
 
-    Both slash styles and ``!/`` archive boundaries are preserved so a finding
-    remains locatable.  This function is display-only; its output must never be
-    used to open a file.
+    Both slash styles and ``!/`` archive boundaries are preserved when they fit
+    the display budget.  A limit never produces a raw prefix: overlong names are
+    replaced as whole components and an overlong final path becomes one fixed
+    placeholder.
     """
 
     if not isinstance(path, str):
         raise TypeError("path must be str")
+    if max_name_bytes <= 0 or max_display_path_chars <= 0:
+        raise ValueError("path limits must be greater than zero")
+
+    initial_reasons = path_limit_reasons(
+        path,
+        max_name_bytes=max_name_bytes,
+        max_display_path_chars=max_display_path_chars,
+    )
+    if "display_path_limit" in initial_reasons:
+        return DisplayPathResult(DISPLAY_PATH_LIMIT_PLACEHOLDER, initial_reasons)
+
+    sanitized, name_limited = _replace_oversized_components(path, max_name_bytes)
+    reasons: list[str] = ["name_limit"] if name_limited else []
 
     # Filesystem and archive labels are untrusted terminal content.  Make all
     # C0/C1 controls and DEL visible before applying any other masking so a
     # member name cannot forge report lines or emit terminal control sequences.
-    sanitized = _DISPLAY_CONTROL_RE.sub(
-        lambda match: _mask_control_characters(match.group(0)), path
-    )
+    controls_masked = _mask_controls_bounded(sanitized, max_display_path_chars)
+    if controls_masked is None:
+        return DisplayPathResult(
+            DISPLAY_PATH_LIMIT_PLACEHOLDER,
+            tuple((*reasons, "display_path_limit")),
+        )
+    sanitized = controls_masked
     sanitized = _UNC_HOME_RE.sub(
         lambda match: f"{match.group('lead')}<host>{match.group('prefix')}<user>",
         sanitized,
@@ -173,6 +355,11 @@ def sanitize_display_path(path: str) -> str:
     sanitized = _RELATIVE_HOME_RE.sub(
         lambda match: f"{match.group('prefix')}<user>", sanitized
     )
+    if len(sanitized) > max_display_path_chars:
+        return DisplayPathResult(
+            DISPLAY_PATH_LIMIT_PLACEHOLDER,
+            tuple((*reasons, "display_path_limit")),
+        )
 
     # Import lazily to keep detector definitions independent from report
     # rendering while still sharing validators for path-segment PII.
@@ -183,7 +370,7 @@ def sanitize_display_path(path: str) -> str:
     # grammars legitimately allow '/' in ordinary prose; running them across
     # a display path would let one match consume and erase the ``!/`` archive
     # boundary or neighboring components.
-    for component in re.finditer(r"[^\\/]+", sanitized):
+    for component in _PATH_COMPONENT_RE.finditer(sanitized):
         component_text = component.group(0)
         for hit in detect_text(component_text):
             if hit.category in {"pii", "secret", "unicode_control"}:
@@ -193,29 +380,49 @@ def sanitize_display_path(path: str) -> str:
     # Specific/high-confidence matches win if two detectors cover the same
     # filename characters.  Applying overlapping replacements independently
     # could otherwise splice part of a sensitive value back into the result.
-    selected: list[tuple[object, int, int]] = []
-    for hit, start, end in sorted(
-        candidates,
-        key=lambda item: (
-            -item[0].confidence,
-            -(item[2] - item[1]),
-            item[1],
-            item[0].rule_id,
-        ),
-    ):
-        if any(start < existing_end and existing_start < end for _, existing_start, existing_end in selected):
-            continue
-        selected.append((hit, start, end))
-
-    replacements: list[tuple[int, int, str]] = []
+    selected = sorted(_select_non_overlapping(candidates), key=lambda item: item[1])
+    pieces: list[str] = []
+    cursor = 0
+    output_chars = 0
     for hit, start, end in selected:
-        raw_value = sanitized[start:end]
-        replacements.append(
-            (start, end, mask_value(raw_value, hit.value_class))
+        literal = sanitized[cursor:start]
+        replacement = mask_value(sanitized[start:end], hit.value_class)
+        output_chars += len(literal) + len(replacement)
+        if output_chars > max_display_path_chars:
+            return DisplayPathResult(
+                DISPLAY_PATH_LIMIT_PLACEHOLDER,
+                tuple((*reasons, "display_path_limit")),
+            )
+        pieces.extend((literal, replacement))
+        cursor = end
+    tail = sanitized[cursor:]
+    if output_chars + len(tail) > max_display_path_chars:
+        return DisplayPathResult(
+            DISPLAY_PATH_LIMIT_PLACEHOLDER,
+            tuple((*reasons, "display_path_limit")),
         )
-    for start, end, replacement in sorted(replacements, reverse=True):
-        sanitized = sanitized[:start] + replacement + sanitized[end:]
-    return sanitized
+    pieces.append(tail)
+    return DisplayPathResult("".join(pieces), tuple(reasons))
+
+
+def sanitize_display_path(
+    path: str,
+    *,
+    max_name_bytes: int = DEFAULT_MAX_NAME_BYTES,
+    max_display_path_chars: int = DEFAULT_MAX_DISPLAY_PATH_CHARS,
+) -> str:
+    """Return only the display value from :func:`sanitize_display_path_result`.
+
+    This compatibility wrapper is display-only; its output must never be used
+    to open a file.  Report construction uses the structured result so a limit
+    also becomes an explicit coverage gap.
+    """
+
+    return sanitize_display_path_result(
+        path,
+        max_name_bytes=max_name_bytes,
+        max_display_path_chars=max_display_path_chars,
+    ).value
 
 
 def user_home_container_context(path_name: str) -> str | None:
@@ -263,11 +470,16 @@ def contextual_relative_path(
 
 
 __all__ = [
+    "DISPLAY_PATH_LIMIT_PLACEHOLDER",
+    "DisplayPathResult",
+    "NAME_LIMIT_PLACEHOLDER",
     "contextual_relative_path",
     "content_hmac_token",
     "hmac_token",
     "mask_value",
+    "path_limit_reasons",
     "sanitize_display_path",
+    "sanitize_display_path_result",
     "temporary_hmac_key",
     "user_home_container_context",
 ]

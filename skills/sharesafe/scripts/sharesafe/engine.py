@@ -17,6 +17,12 @@ from .redaction import (
     contextual_relative_path,
     user_home_container_context,
 )
+from .safe_io import (
+    FileIdentityChangedError,
+    file_identity,
+    open_verified_binary,
+    verify_open_file_unchanged,
+)
 from .sniff import MediaInfo, sniff, suspicious_extension
 
 
@@ -31,7 +37,7 @@ VCS_DIRECTORIES = {".git", ".hg", ".svn"}
 @dataclass(frozen=True, slots=True)
 class ScanConfig:
     limits: Limits = field(default_factory=Limits)
-    report_mode: str = "shareable"
+    report_mode: str = "local_masked"
     optional_tools: bool = True
     logical_paths: bool = False
 
@@ -331,10 +337,22 @@ class Scanner:
                     "File exceeds the configured byte limit and was not read.",
                 )
                 return artifact
-            with path.open("rb") as handle:
-                opened = os.fstat(handle.fileno())
+            handle, opened = open_verified_binary(path, expected=before)
+            with handle:
                 data = handle.read(self.config.limits.max_file_bytes + 1)
-            after = path.stat(follow_symlinks=False)
+                unchanged = verify_open_file_unchanged(handle, path, opened=opened)
+        except FileIdentityChangedError:
+            artifact = builder.add_artifact(
+                path=sanitize_display_path(display_path), content_token=None, size=None,
+                media_type="application/octet-stream", status="partial",
+            )
+            builder.add_gap(
+                artifact,
+                "content",
+                "file_identity_changed_before_read",
+                "File identity changed before its bytes could be inspected.",
+            )
+            return artifact
         except OSError as exc:
             artifact = builder.add_artifact(
                 path=sanitize_display_path(display_path), content_token=None, size=None,
@@ -363,10 +381,7 @@ class Scanner:
                 else (path.name if self.config.logical_paths else display_path)
             ),
         )
-        identity_before = (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns)
-        identity_opened = (opened.st_dev, opened.st_ino, opened.st_size, opened.st_mtime_ns)
-        identity_after = (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns)
-        if identity_before != identity_opened or identity_opened != identity_after:
+        if file_identity(before) != file_identity(opened) or not unchanged:
             builder.add_gap(artifact, "content", "file_changed_during_scan", "File identity or metadata changed while it was being scanned.")
         return artifact
 
@@ -524,4 +539,9 @@ class Scanner:
                 title="Executable content is present in the share boundary",
                 remediation_action="remove_unless_explicitly_intended",
             )
-        builder.add_gap(artifact, "content", "unsupported_format", "This binary format has no complete v0.1 parser.")
+        builder.add_gap(
+            artifact,
+            "content",
+            "unsupported_format",
+            "This binary format has no complete parser in this release.",
+        )

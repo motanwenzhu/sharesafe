@@ -10,7 +10,7 @@ import shutil
 import stat
 import struct
 import tempfile
-from typing import Any
+from typing import Any, Mapping
 from urllib.parse import unquote, urlsplit
 import zipfile
 import xml.etree.ElementTree as ET
@@ -26,7 +26,15 @@ from .ooxml_xml import (
     parse_xml,
 )
 from .path_safety import same_or_within, uses_windows_alternate_stream
+from .receipts import SanitizationActions, new_sanitization_actions
 from .redaction import contextual_relative_path, user_home_container_context
+from .safe_io import (
+    FileIdentityChangedError,
+    prepare_verified_parent,
+    open_verified_binary,
+    verify_directory_unchanged,
+    verify_open_file_unchanged,
+)
 from .sniff import sniff
 from .zip_safety import preflight_zip
 
@@ -40,7 +48,14 @@ class UnsafeSanitizeRequest(ValueError):
     """Raised before any destination is committed."""
 
 
-def create_sanitized_copy(source: Path, destination: Path, limits: Limits) -> list[dict[str, Any]]:
+def create_sanitized_copy(
+    source: Path,
+    destination: Path,
+    limits: Limits,
+    *,
+    evidence_key: bytes | None = None,
+    before_report: Mapping[str, Any] | None = None,
+) -> list[dict[str, Any]]:
     source = source.absolute()
     destination = destination.absolute()
     if uses_windows_alternate_stream(source) or uses_windows_alternate_stream(destination):
@@ -55,9 +70,17 @@ def create_sanitized_copy(source: Path, destination: Path, limits: Limits) -> li
         raise UnsafeSanitizeRequest("destination cannot be inside the source directory")
     _preflight_source(source, limits)
 
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    stage_root = Path(tempfile.mkdtemp(prefix=".sharesafe-stage-", dir=destination.parent))
-    actions: list[dict[str, Any]] = []
+    try:
+        parent_snapshot = prepare_verified_parent(destination)
+    except FileIdentityChangedError as exc:
+        raise UnsafeSanitizeRequest("destination parent is unsafe or changed") from exc
+    stage_root = Path(
+        tempfile.mkdtemp(prefix=".sharesafe-stage-", dir=parent_snapshot.path)
+    )
+    actions = new_sanitization_actions(
+        evidence_key=evidence_key,
+        before_report=before_report,
+    )
     try:
         if source.is_dir():
             staged_payload = stage_root / "payload"
@@ -70,8 +93,11 @@ def create_sanitized_copy(source: Path, destination: Path, limits: Limits) -> li
             _normalize_path(staged_payload, directory=False)
         else:
             raise UnsafeSanitizeRequest("only regular files and directories are supported")
+        if not verify_directory_unchanged(parent_snapshot):
+            raise UnsafeSanitizeRequest("destination parent changed before commit")
         commit_mode = _commit_no_overwrite(staged_payload, destination)
-        _normalize_path(destination, directory=destination.is_dir())
+        if not verify_directory_unchanged(parent_snapshot):
+            raise UnsafeSanitizeRequest("destination parent changed during commit")
         actions.append({
             "path": "<new-copy>",
             "action": "commit_without_overwrite",
@@ -83,13 +109,23 @@ def create_sanitized_copy(source: Path, destination: Path, limits: Limits) -> li
             "action": "normalize_access_and_modification_times",
             "status": "applied",
         })
+        actions.append({
+            "path": "<new-copy>",
+            "action": "verify_destination_parent_identity",
+            "status": "applied",
+            "mode": "path_checkpoint_not_handle_anchored",
+        })
     except Exception:
         if destination.exists():
             # os.replace is the commit point. Never erase a committed result silently.
             raise
         raise
     finally:
-        shutil.rmtree(stage_root, ignore_errors=True)
+        # Do not resolve a private staging name through a directory path that
+        # no longer identifies the parent we created it in.  Leaving a private
+        # orphan is safer than recursively deleting through a swapped parent.
+        if verify_directory_unchanged(parent_snapshot):
+            shutil.rmtree(stage_root, ignore_errors=True)
     return actions
 
 
@@ -130,6 +166,7 @@ def _commit_no_overwrite(staged: Path, destination: Path) -> str:
         for child in staged.iterdir():
             os.rename(child, destination / child.name)
         staged.rmdir()
+        _normalize_path(destination, directory=True)
         return "reserved_directory_commit"
     except Exception:
         shutil.rmtree(destination, ignore_errors=True)
@@ -145,6 +182,7 @@ def _copy_staged_file_exclusive(staged: Path, destination: Path) -> str:
             shutil.copyfileobj(source_handle, destination_handle, length=1024 * 1024)
             destination_handle.flush()
             os.fsync(destination_handle.fileno())
+        _normalize_path(destination, directory=False)
         return "exclusive_reserved_copy"
     except FileExistsError as exc:
         raise UnsafeSanitizeRequest("destination appeared during sanitization; nothing was overwritten") from exc
@@ -200,7 +238,12 @@ def _preflight_source(source: Path, limits: Limits) -> None:
                 raise UnsafeSanitizeRequest("source exceeds the sanitization byte budget")
 
 
-def _copy_directory(source: Path, destination: Path, limits: Limits, actions: list[dict[str, Any]]) -> None:
+def _copy_directory(
+    source: Path,
+    destination: Path,
+    limits: Limits,
+    actions: SanitizationActions,
+) -> None:
     scan_context = user_home_container_context(source.name)
     for directory, dir_names, file_names in os.walk(source, followlinks=False):
         if _is_link_or_reparse(Path(directory)):
@@ -225,7 +268,7 @@ def _transform_file(
     destination: Path,
     display_path: str,
     limits: Limits,
-    actions: list[dict[str, Any]],
+    actions: SanitizationActions,
 ) -> None:
     destination.parent.mkdir(parents=True, exist_ok=True)
     before = source.stat(follow_symlinks=False)
@@ -281,6 +324,19 @@ def _transform_file(
         action = "sanitize_archive_members"
         status = "unsupported"
         reason = "v0.1_does_not_rewrite_plain_zip"
+
+    if action in {"remove_ooxml_metadata", "strip_png_metadata", "strip_jpeg_metadata"}:
+        actions.add_transform_receipt(
+            relative_path=safe_path,
+            action_kind=action,
+            media_type_before=media.media_type,
+            media_type_after=sniff(output, source.name).media_type,
+            transform_input=data,
+            expected_after=output,
+            status=status,
+            reason=reason,
+            limits=limits,
+        )
 
     with destination.open("xb") as handle:
         handle.write(output)
@@ -726,19 +782,16 @@ def _apply_safe_file_mode(source: Path, destination: Path) -> None:
         pass
 
 
-def _identity(status: os.stat_result) -> tuple[int, int, int, int]:
-    return (status.st_dev, status.st_ino, status.st_size, status.st_mtime_ns)
-
-
 def _stable_read(source: Path, limit: int) -> bytes:
     before = source.stat(follow_symlinks=False)
-    with source.open("rb") as handle:
-        opened = os.fstat(handle.fileno())
-        if _identity(before) != _identity(opened):
-            raise UnsafeSanitizeRequest("source changed before it could be read")
+    try:
+        handle, opened = open_verified_binary(source, expected=before)
+    except FileIdentityChangedError as exc:
+        raise UnsafeSanitizeRequest("source changed before it could be read") from exc
+    with handle:
         data = handle.read(limit + 1)
-    after = source.stat(follow_symlinks=False)
-    if _identity(opened) != _identity(after):
+        unchanged = verify_open_file_unchanged(handle, source, opened=opened)
+    if not unchanged:
         raise UnsafeSanitizeRequest("source changed while it was being read")
     if len(data) > limit or len(data) != opened.st_size:
         raise UnsafeSanitizeRequest("source exceeded its bounded size while being read")
@@ -748,10 +801,11 @@ def _stable_read(source: Path, limit: int) -> bytes:
 def _stable_stream_copy(source: Path, destination: Path, limit: int) -> None:
     before = source.stat(follow_symlinks=False)
     copied = 0
-    with source.open("rb") as input_handle, destination.open("xb") as output_handle:
-        opened = os.fstat(input_handle.fileno())
-        if _identity(before) != _identity(opened):
-            raise UnsafeSanitizeRequest("source changed before it could be copied")
+    try:
+        input_handle, opened = open_verified_binary(source, expected=before)
+    except FileIdentityChangedError as exc:
+        raise UnsafeSanitizeRequest("source changed before it could be copied") from exc
+    with input_handle, destination.open("xb") as output_handle:
         while True:
             chunk = input_handle.read(1024 * 1024)
             if not chunk:
@@ -762,8 +816,8 @@ def _stable_stream_copy(source: Path, destination: Path, limit: int) -> None:
             output_handle.write(chunk)
         output_handle.flush()
         os.fsync(output_handle.fileno())
-    after = source.stat(follow_symlinks=False)
-    if _identity(opened) != _identity(after) or copied != opened.st_size:
+        unchanged = verify_open_file_unchanged(input_handle, source, opened=opened)
+    if not unchanged or copied != opened.st_size:
         raise UnsafeSanitizeRequest("source changed while it was being copied")
 
 

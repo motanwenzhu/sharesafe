@@ -97,7 +97,7 @@ Detection breadth does not authorize transformation breadth. A sanitizer must ha
 - residual/new-finding reporting;
 - clear incomplete behavior when a required parser or representation is unavailable.
 
-Body-text replacement, visual redaction, comment/revision deletion, and active-content removal are outside v0.1 unless introduced through an explicit reviewed design change.
+Body-text replacement, visual redaction, comment/revision deletion, and active-content removal are outside the current supported boundary unless introduced through an explicit reviewed design change.
 
 ## Report and CLI compatibility
 
